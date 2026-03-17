@@ -15,6 +15,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.kusm.pomo",
       "adaptiveIcon": {
         "backgroundColor": "#E53935",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -22,19 +23,32 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "permissions": ["NOTIFICATIONS", "RECEIVE_BOOT_COMPLETED", "VIBRATE"]
+      "permissions": [
+        "NOTIFICATIONS",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ]
     },
     "plugins": [
       [
         "expo-notifications",
         {
           "icon": "./assets/icon.png",
-          "color": "#E53935"
+          "color": "#E53935",
+          "sounds": [
+            "./assets/ding.wav",
+            "./assets/ding2.wav"
+          ]
         }
       ]
     ],
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "0831f538-184c-40a1-8ce6-1dae304e1757"
+      }
     }
   }
 }
