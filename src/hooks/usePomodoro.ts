@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus, NativeModules, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { Audio } from 'expo-av';
 import { SessionType, Settings } from '../types';
@@ -10,7 +10,15 @@ const soundAssets = {
   break: require('../../assets/ding.wav'),
 };
 
-async function playSound(asset: ReturnType<typeof require>) {
+const soundFiles = { work: 'ding2.wav', break: 'ding.wav' };
+
+// On Android use AlarmSound native module so audio routes through alarm volume stream.
+// On iOS (or if module missing) fall back to expo-av.
+async function playSound(type: 'work' | 'break', asset: ReturnType<typeof require>) {
+  if (Platform.OS === 'android' && NativeModules.AlarmSound) {
+    NativeModules.AlarmSound.play(soundFiles[type]);
+    return;
+  }
   try {
     const { sound } = await Audio.Sound.createAsync(asset);
     await sound.playAsync();
@@ -69,6 +77,16 @@ async function scheduleEndNotification(title: string, body: string, fireAt: Date
     content: { title, body, sound },
     trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: fireAt, channelId },
   });
+  // Schedule AlarmActivity directly via AlarmManager — bypasses Android 14+ FSI restrictions
+  if (Platform.OS === 'android' && NativeModules.AlarmSound) {
+    NativeModules.AlarmSound.scheduleAlarm(fireAt.getTime(), title, body, sound);
+  }
+}
+
+function cancelAlarmActivity() {
+  if (Platform.OS === 'android' && NativeModules.AlarmSound) {
+    NativeModules.AlarmSound.cancelAlarm();
+  }
 }
 
 export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): UsePomodoroReturn {
@@ -100,10 +118,16 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
   const advanceSession = useCallback((notify: boolean = true) => {
     const current = sessionTypeRef.current;
     const completed = completedRef.current;
+    // If the timer ended more than 3 s ago, the screen was off and AlarmActivity already
+    // played the sound — skip in-app sound/notification to avoid a duplicate when the
+    // JS timer resumes after the screen turns back on.
+    const overdueMs = endTimeRef.current ? Math.max(0, Date.now() - endTimeRef.current) : 0;
+    const shouldNotify = notify && overdueMs < 3000;
 
     cancelScheduledNotifications();
-    if (notify) {
-      playSound(current === 'work' ? soundAssets.work : soundAssets.break);
+    cancelAlarmActivity();
+    if (shouldNotify) {
+      playSound(current === 'work' ? 'work' : 'break', current === 'work' ? soundAssets.work : soundAssets.break);
       Notifications.scheduleNotificationAsync({
         content: {
           title: 'Pomodoro',
@@ -167,6 +191,7 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
         intervalRef.current = null;
       }
       cancelScheduledNotifications();
+      cancelAlarmActivity();
       // Persist remaining time into endTime offset for next resume
       endTimeRef.current = null;
     }

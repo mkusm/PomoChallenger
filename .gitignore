@@ -36,6 +36,10 @@ yarn-error.*
 # Claude Code
 .claude/
 
+# Local build scripts
+build-pomo.sh
+install-android-sdk.sh
+
 # typescript
 *.tsbuildinfo
 

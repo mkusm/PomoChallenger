@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadSettings, saveSettings, saveChallenges, saveGroups } from '../storage/storage';
 import { Settings, DEFAULT_SETTINGS, DEFAULT_CHALLENGES, DEFAULT_GROUPS } from '../types';
+import Constants from 'expo-constants';
 
 function parseMinutes(v: string, fallback: number): number {
   const n = parseInt(v, 10);
@@ -182,6 +183,7 @@ export default function SettingsScreen() {
           <TouchableOpacity style={styles.factoryResetBtn} onPress={handleFactoryReset}>
             <Text style={styles.factoryResetBtnText}>Clear all data</Text>
           </TouchableOpacity>
+          <Text style={styles.version}>v{Constants.expoConfig?.version}</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -263,4 +265,5 @@ const styles = StyleSheet.create({
     borderColor: '#FFCDD2',
   },
   factoryResetBtnText: { color: '#E53935', fontWeight: '600', fontSize: 15 },
+  version: { textAlign: 'center', color: '#bbb', fontSize: 12, marginTop: 16, marginBottom: 8 },
 });

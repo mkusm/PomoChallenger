@@ -2,7 +2,7 @@
   "expo": {
     "name": "Pomo",
     "slug": "pomo",
-    "version": "1.0.0",
+    "version": "1.0.13",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -26,10 +26,16 @@
       "permissions": [
         "NOTIFICATIONS",
         "RECEIVE_BOOT_COMPLETED",
-        "VIBRATE"
+        "VIBRATE",
+        "USE_FULL_SCREEN_INTENT",
+        "USE_EXACT_ALARM",
+        "WAKE_LOCK",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ]
     },
     "plugins": [
+      "./plugins/withFullScreenIntent",
       [
         "expo-notifications",
         {
