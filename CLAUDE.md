@@ -7,17 +7,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm start              # Start Expo dev server
 npm run android        # Launch on Android device/emulator
-npm run ios            # Launch on iOS simulator
 
 # Local build (Android SDK installed at ~/android-sdk)
-bash build-pomo.sh     # Builds a preview APK locally and copies to Dropbox. Use this — do NOT run eas build manually.
-
-# EAS cloud build (queues on Expo servers — can be slow)
-eas build --platform android --profile preview --local   # local machine
-eas build --platform android --profile preview           # cloud
+bash build-pomo.sh     # Increments patch version, builds APK, copies to Dropbox. Use this — do NOT run eas build manually.
 ```
 
-`build-pomo.sh` sets up the required env vars (`ANDROID_HOME`, `ANDROID_NDK_HOME`, `JAVA_HOME`) and runs `eas build --local`. Android SDK is at `~/android-sdk`, NDK at `~/android-sdk/ndk/26.1.10909125`, JDK 17 via apt.
+`build-pomo.sh` sets up env vars (`ANDROID_HOME`, `ANDROID_NDK_HOME`, `JAVA_HOME`) and runs `eas build --local --clear-cache`. Android SDK at `~/android-sdk`, NDK at `~/android-sdk/ndk/26.1.10909125`, JDK 17 via apt. APK output goes to `build/`.
 
 No linter or test suite is configured.
 
@@ -27,42 +22,66 @@ Expo React Native app (TypeScript) targeting Android primarily, with iOS support
 
 ### Timer engine (`src/hooks/usePomodoro.ts`)
 
-The core logic uses a **wall-clock endTime** strategy: when the timer starts, an absolute `endTimeRef` is set (`Date.now() + remaining * 1000`), and ticks recompute `timeRemaining` from that reference. This ensures background time is automatically accounted for when the app resumes. AppState listener triggers a recalc on foreground.
+Uses a **wall-clock endTime** strategy: `endTimeRef` holds the absolute timestamp when the session ends (`Date.now() + remaining * 1000`). Ticks recompute `timeRemaining` from that reference so background time is automatically accounted for. An `AppState` listener triggers an immediate recalc on foreground resume.
 
-On session end, `advanceSession` fires: plays an in-app sound via `expo-av` AND fires an immediate `expo-notifications` notification (for lock screen / background). A scheduled notification is also set at `endTime` when the timer starts, so the lock screen gets notified even if the app is killed.
+On session end, `advanceSession` fires. It checks `overdueMs` (how long ago `endTime` passed) — if >3s, the screen was off and `AlarmActivity` already handled sound/notification, so in-app sound is skipped to avoid duplicates.
 
-### Notifications & sound (`App.tsx` + `usePomodoro.ts`)
+`isScrubbingRef` suppresses tick updates while the user drags the slider. Auto-start uses `setIsRunning(false)` + `setTimeout(() => setIsRunning(true), 0)` to force the `isRunning` effect to re-fire even when already `true`.
 
-- Android notification channels are created in `App.tsx` on startup: `CHANNEL_WORK` (`pomo-work-3`) and `CHANNEL_BREAK` (`pomo-break-3`). Channel IDs are versioned — **increment the suffix** to force Android to recreate the channel when sound/importance settings change (Android permanently caches channel config after first creation).
-- Channels use `importance: MAX`, `lockscreenVisibility: PUBLIC`, `bypassDnd: true` so notifications behave like alarms.
-- Custom sound files (`ding.wav`, `ding2.wav`) must be declared in **both** `app.json` under `plugins → expo-notifications → sounds` **and** referenced in the channel `sound` field in `App.tsx`. Changing sounds requires a new native build.
-- In-app audio uses `expo-av`. This does **not** play when the screen is locked — lock-screen sound comes from the notification channel.
+### Alarm system (`plugins/android/`)
+
+On Android, alarms are handled natively — `expo-notifications` is intentionally skipped on Android to avoid double-firing.
+
+**Flow when screen is off / app is in background:**
+1. `AlarmSoundModule.scheduleAlarm()` calls `AlarmManager.setAlarmClock()` with a `getForegroundService()` `PendingIntent` targeting `AlarmService`.
+2. `AlarmService` (ForegroundService) starts, acquires a `ACQUIRE_CAUSES_WAKEUP` WakeLock, calls `startForeground()` with a silent notification, then posts an alarm notification with `setFullScreenIntent()`.
+3. If the device is **locked**: posts on `FSI_CHANNEL_ID` (IMPORTANCE_HIGH, silent) — FSI triggers `AlarmActivity` which plays sound via MediaPlayer.
+4. If the device is **unlocked**: posts on the alarm channel (IMPORTANCE_MAX, with sound) — shows as a heads-up notification.
+5. `AlarmService` sets `AlarmSoundModule.alarmActivityShowing = true` before launching the activity, so JS `play()` is skipped (prevents double sound).
+6. If the app is **already in the foreground**, `AlarmService` bails immediately — JS handles sound via `expo-av`.
+
+`AlarmActivity` auto-dismisses on sound completion, with a 5s fallback.
+
+### Notification channels (`App.tsx`)
+
+Two channels created at startup: `CHANNEL_WORK` (`pomo-work-4`) and `CHANNEL_BREAK` (`pomo-break-4`). Both use `importance: MAX`, `bypassDnd: true`, `audioAttributes: { usage: ALARM }`.
+
+**Channel IDs are versioned** — increment the suffix (e.g. `-4` → `-5`) whenever sound or importance settings change, because Android permanently caches channel config after first creation. The suffix must also be updated in `AlarmService.kt` (`WORK_CHANNEL_ID` / `BREAK_CHANNEL_ID`).
+
+Custom sounds (`ding.wav`, `ding2.wav`) must be declared in `app.json` under `plugins → expo-notifications → sounds`. Changing sounds requires a new native build.
 
 ### Config plugin (`plugins/withFullScreenIntent.js`)
 
-Runs during `expo prebuild` (i.e. as part of every EAS build) and does three things:
+Runs during `expo prebuild` (every EAS build). Reads Kotlin source files from `plugins/android/`, substitutes the package name (replacing `PACKAGE_NAME`), and writes them into the generated Android project. Also:
 
-1. **Patches `ExpoNotificationBuilder.kt`** in node_modules to add `builder.setFullScreenIntent(pendingIntent, true)` — makes notifications take over the full screen when the device is locked.
-2. **Creates two Kotlin files** in the generated Android project (`FullScreenIntentModule.kt`, `FullScreenIntentPackage.kt`) — a React Native native module exposing `isGranted()` and `openSettings()` for the `USE_FULL_SCREEN_INTENT` permission.
-3. **Patches `MainApplication.kt`** to register the native module, and sets `gradle.properties` entries:
-   - `kotlin.compiler.execution.strategy=in-process` — prevents a WSL2-specific deadlock where the Kotlin compiler daemon hangs indefinitely
-   - `org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=2g` — required because in-process compilation loads Kotlin compiler classes into the Gradle JVM's metaspace
-
-`App.tsx` calls `NativeModules.FullScreenIntent.isGranted()` on launch and on every foreground resume. On Android 14+ if not granted, it shows an Alert prompting the user to open the `USE_FULL_SCREEN_INTENT` settings page.
+1. **Patches `ExpoNotificationBuilder.kt`** in node_modules to add `setCategory(CATEGORY_ALARM)`.
+2. **Patches `MainApplication.kt`** to register `FullScreenIntentPackage`.
+3. **Sets `gradle.properties`** entries:
+   - `kotlin.compiler.execution.strategy=in-process` — prevents WSL2 Kotlin daemon deadlock
+   - `org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=2g` — required for in-process compilation
 
 ### Data flow
 
-Settings and challenges are persisted to AsyncStorage via `src/storage/storage.ts`. `TimerScreen` polls storage every second to pick up changes from other tabs. Challenges have a `group` field; `pickChallenge` biases 75% toward a different group than the last shown.
+Settings and challenges are persisted to AsyncStorage via `src/storage/storage.ts`. `TimerScreen` polls storage every second, guarded by JSON comparison so `setSettings`/`setChallenges` only fire when data actually changes (avoids unnecessary re-renders that would reset timer state).
+
+Challenges have a `group` field; `pickChallenge` biases 75% toward a different group than the last shown.
 
 ### Key files
 
 | File | Role |
 |------|------|
-| `App.tsx` | Notification handler, Android channel setup, exported channel ID constants, full-screen intent permission check |
-| `src/hooks/usePomodoro.ts` | All timer state, notification scheduling, sound playback |
-| `src/screens/TimerScreen.tsx` | UI, challenge modal (full-screen `Modal`) |
+| `App.tsx` | Notification channels, full-screen intent permission check, notification handler |
+| `src/hooks/usePomodoro.ts` | All timer state, alarm scheduling, in-app sound |
+| `src/screens/TimerScreen.tsx` | Timer UI, break challenge modal |
+| `src/screens/ChallengesScreen.tsx` | Challenge/group CRUD |
+| `src/screens/SettingsScreen.tsx` | Settings UI |
 | `src/types/index.ts` | `SessionType`, `Settings`, `Challenge`, defaults |
-| `plugins/withFullScreenIntent.js` | Config plugin — patches expo-notifications for full-screen intent + native module |
-| `app.json` | Expo config — sound assets, Android permissions, EAS project ID |
-| `eas.json` | Build profiles (development, preview APK, production) |
-| `build-pomo.sh` | Local build script (gitignored, machine-specific paths) |
+| `src/storage/storage.ts` | AsyncStorage wrappers |
+| `plugins/withFullScreenIntent.js` | Config plugin — copies Kotlin files, patches expo-notifications, configures Gradle |
+| `plugins/android/AlarmService.kt` | ForegroundService — wakelock, FSI notification, foreground guard |
+| `plugins/android/AlarmActivity.kt` | Full-screen UI shown over lock screen; plays sound, auto-dismisses |
+| `plugins/android/AlarmSoundModule.kt` | RN native module — `play()`, `scheduleAlarm()`, `cancelAlarm()` |
+| `plugins/android/FullScreenIntentModule.kt` | RN native module — `isGranted()`, `openSettings()` for USE_FULL_SCREEN_INTENT |
+| `app.json` | Expo config — permissions, sound assets, EAS project ID |
+| `eas.json` | Build profiles |
+| `build-pomo.sh` | Local build script (gitignored) |
