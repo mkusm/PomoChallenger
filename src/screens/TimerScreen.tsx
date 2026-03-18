@@ -52,18 +52,23 @@ export default function TimerScreen() {
   const [challengeModalVisible, setChallengeModalVisible] = useState(false);
   const lastGroupRef = useRef<string | undefined>(undefined);
 
-  useEffect(() => {
-    loadSettings().then(setSettings);
-    loadChallenges().then(setChallenges);
+  const settingsJsonRef = useRef('');
+  const challengesJsonRef = useRef('');
+
+  const refreshData = useCallback(() => {
+    Promise.all([loadSettings(), loadChallenges()]).then(([s, c]) => {
+      const sJson = JSON.stringify(s);
+      const cJson = JSON.stringify(c);
+      if (sJson !== settingsJsonRef.current) { settingsJsonRef.current = sJson; setSettings(s); }
+      if (cJson !== challengesJsonRef.current) { challengesJsonRef.current = cJson; setChallenges(c); }
+    });
   }, []);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      loadSettings().then(setSettings);
-      loadChallenges().then(setChallenges);
-    }, 1000);
+    refreshData();
+    const interval = setInterval(refreshData, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [refreshData]);
 
   const handleBreakStart = useCallback(() => {
     loadChallenges().then((c) => {

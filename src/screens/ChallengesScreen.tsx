@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,58 @@ function uid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function InputModal({
+  visible,
+  title,
+  value,
+  onChange,
+  placeholder,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+}: {
+  visible: boolean;
+  title: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Modal visible={visible} animationType="slide" transparent>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>{title}</Text>
+          <TextInput
+            style={styles.modalInput}
+            value={value}
+            onChangeText={onChange}
+            placeholder={placeholder}
+            placeholderTextColor="#aaa"
+            autoFocus
+            returnKeyType="done"
+            onSubmitEditing={onConfirm}
+          />
+          <View style={styles.modalActions}>
+            <TouchableOpacity style={styles.modalCancel} onPress={onCancel}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modalConfirm, !value.trim() && styles.modalConfirmDisabled]}
+              onPress={onConfirm}
+              disabled={!value.trim()}
+            >
+              <Text style={styles.modalConfirmText}>{confirmLabel}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function ChallengesScreen() {
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [groups, setGroups] = useState<string[]>([]);
@@ -34,8 +86,10 @@ export default function ChallengesScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadChallenges().then(setChallenges);
-      loadGroups().then(setGroups);
+      Promise.all([loadChallenges(), loadGroups()]).then(([c, g]) => {
+        setChallenges(c);
+        setGroups(g);
+      });
     }, [])
   );
 
@@ -92,14 +146,16 @@ export default function ChallengesScreen() {
   };
 
   // Build sections: one per group (including empty groups), plus orphaned challenges
-  const allGroupNames = [
-    ...groups,
-    ...challenges.map((c) => c.group).filter((g) => !groups.includes(g)),
-  ];
-  const sections = allGroupNames.map((group) => ({
-    group,
-    data: challenges.filter((c) => c.group === group),
-  }));
+  const sections = useMemo(() => {
+    const allGroupNames = [
+      ...groups,
+      ...challenges.map((c) => c.group).filter((g) => !groups.includes(g)),
+    ];
+    return allGroupNames.map((group) => ({
+      group,
+      data: challenges.filter((c) => c.group === group),
+    }));
+  }, [groups, challenges]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -154,67 +210,27 @@ export default function ChallengesScreen() {
         />
       </KeyboardAvoidingView>
 
-      {/* Add challenge modal */}
-      <Modal visible={!!addingToGroup} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Add to {addingToGroup}</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={challengeInput}
-              onChangeText={setChallengeInput}
-              placeholder="What's the challenge?"
-              placeholderTextColor="#aaa"
-              autoFocus
-              returnKeyType="done"
-              onSubmitEditing={addChallenge}
-            />
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalCancel} onPress={() => { setAddingToGroup(null); setChallengeInput(''); }}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalConfirm, !challengeInput.trim() && styles.modalConfirmDisabled]}
-                onPress={addChallenge}
-                disabled={!challengeInput.trim()}
-              >
-                <Text style={styles.modalConfirmText}>Add</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <InputModal
+        visible={!!addingToGroup}
+        title={`Add to ${addingToGroup}`}
+        value={challengeInput}
+        onChange={setChallengeInput}
+        placeholder="What's the challenge?"
+        confirmLabel="Add"
+        onConfirm={addChallenge}
+        onCancel={() => { setAddingToGroup(null); setChallengeInput(''); }}
+      />
 
-      {/* Add group modal */}
-      <Modal visible={groupModalVisible} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>New Group</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={groupInput}
-              onChangeText={setGroupInput}
-              placeholder="Group name..."
-              placeholderTextColor="#aaa"
-              autoFocus
-              returnKeyType="done"
-              onSubmitEditing={addGroup}
-            />
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalCancel} onPress={() => { setGroupModalVisible(false); setGroupInput(''); }}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalConfirm, !groupInput.trim() && styles.modalConfirmDisabled]}
-                onPress={addGroup}
-                disabled={!groupInput.trim()}
-              >
-                <Text style={styles.modalConfirmText}>Create</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <InputModal
+        visible={groupModalVisible}
+        title="New Group"
+        value={groupInput}
+        onChange={setGroupInput}
+        placeholder="Group name..."
+        confirmLabel="Create"
+        onConfirm={addGroup}
+        onCancel={() => { setGroupModalVisible(false); setGroupInput(''); }}
+      />
     </SafeAreaView>
   );
 }

@@ -73,13 +73,14 @@ async function scheduleEndNotification(title: string, body: string, fireAt: Date
   const channelId = sessionType === 'work' ? CHANNEL_WORK : CHANNEL_BREAK;
   const sound = sessionType === 'work' ? 'ding2.wav' : 'ding.wav';
   await cancelScheduledNotifications();
-  await Notifications.scheduleNotificationAsync({
-    content: { title, body, sound },
-    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: fireAt, channelId },
-  });
-  // Schedule AlarmActivity directly via AlarmManager — bypasses Android 14+ FSI restrictions
   if (Platform.OS === 'android' && NativeModules.AlarmSound) {
+    // On Android, AlarmService handles the notification — skip expo-notifications to avoid duplicates
     NativeModules.AlarmSound.scheduleAlarm(fireAt.getTime(), title, body, sound);
+  } else {
+    await Notifications.scheduleNotificationAsync({
+      content: { title, body, sound },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: fireAt, channelId },
+    });
   }
 }
 
@@ -102,18 +103,21 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
   const completedRef = useRef(completedPomodoros);
   const settingsRef = useRef(settings);
   const isRunningRef = useRef(isRunning);
+  // True while the user is dragging the slider — suppress tick updates to avoid fighting the thumb
+  const isScrubbingRef = useRef(false);
 
   sessionTypeRef.current = sessionType;
   completedRef.current = completedPomodoros;
   settingsRef.current = settings;
   isRunningRef.current = isRunning;
 
+  // Only reset displayed time when actual duration settings change, not on every poll-created object
   useEffect(() => {
     if (!isRunning) {
       setTimeRemaining(sessionDuration(sessionType, settings));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings]);
+  }, [settings.workDuration, settings.shortBreakDuration, settings.longBreakDuration]);
 
   const advanceSession = useCallback((notify: boolean = true) => {
     const current = sessionTypeRef.current;
@@ -128,14 +132,17 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
     cancelAlarmActivity();
     if (shouldNotify) {
       playSound(current === 'work' ? 'work' : 'break', current === 'work' ? soundAssets.work : soundAssets.break);
-      Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Pomodoro',
-          body: sessionLabel(current),
-          sound: current === 'work' ? 'ding2.wav' : 'ding.wav',
-        },
-        trigger: { channelId: current === 'work' ? CHANNEL_WORK : CHANNEL_BREAK } as any,
-      });
+      // On Android, AlarmService already posted the notification — skip to avoid duplicates
+      if (Platform.OS !== 'android' || !NativeModules.AlarmSound) {
+        Notifications.scheduleNotificationAsync({
+          content: {
+            title: 'Pomodoro',
+            body: sessionLabel(current),
+            sound: current === 'work' ? 'ding2.wav' : 'ding.wav',
+          },
+          trigger: { channelId: current === 'work' ? CHANNEL_WORK : CHANNEL_BREAK } as any,
+        });
+      }
     }
 
     endTimeRef.current = null;
@@ -152,7 +159,11 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
       setSessionType('work');
       setTimeRemaining(sessionDuration('work', settingsRef.current));
     }
-    setIsRunning(autoStart);
+
+    // Force a false→true transition so the isRunning effect always re-fires when auto-starting.
+    // If the timer completed while running, setIsRunning(true) alone is a no-op (no state change).
+    setIsRunning(false);
+    if (autoStart) setTimeout(() => setIsRunning(true), 0);
   }, [onBreakStart]);
 
   const advanceSessionRef = useRef(advanceSession);
@@ -160,7 +171,7 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
 
   // Tick: derive timeRemaining from endTime so background time is accounted for
   const tick = useCallback(() => {
-    if (!endTimeRef.current) return;
+    if (!endTimeRef.current || isScrubbingRef.current) return;
     const remaining = Math.ceil((endTimeRef.current - Date.now()) / 1000);
     if (remaining <= 0) {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -239,13 +250,15 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
     advanceSessionRef.current(false);
   }, []);
 
-  // Live scrub: update display only, don't touch endTimeRef or notifications
+  // Live scrub: update display only, suppress tick updates while dragging
   const scrubTo = useCallback((seconds: number) => {
+    isScrubbingRef.current = true;
     setTimeRemaining(Math.max(1, Math.round(seconds)));
   }, []);
 
-  // Commit: update endTimeRef and reschedule notification
+  // Commit: clear scrub flag, update endTimeRef and reschedule notification
   const seekTo = useCallback((seconds: number) => {
+    isScrubbingRef.current = false;
     const clamped = Math.max(1, Math.round(seconds));
     setTimeRemaining(clamped);
     if (isRunningRef.current) {
