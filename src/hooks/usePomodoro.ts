@@ -90,6 +90,28 @@ function cancelAlarmActivity() {
   }
 }
 
+function sessionCountdownLabel(type: SessionType): string {
+  switch (type) {
+    case 'work':       return 'Work session';
+    case 'shortBreak': return 'Short break';
+    case 'longBreak':  return 'Long break';
+  }
+}
+
+function showCountdownNotification(endTimeMs: number, totalDurationMs: number, sessionType: SessionType) {
+  if (Platform.OS === 'android' && NativeModules.AlarmSound) {
+    NativeModules.AlarmSound.showCountdownNotification(
+      endTimeMs, totalDurationMs, sessionCountdownLabel(sessionType), sessionType !== 'work'
+    );
+  }
+}
+
+function cancelCountdownNotification() {
+  if (Platform.OS === 'android' && NativeModules.AlarmSound) {
+    NativeModules.AlarmSound.cancelCountdownNotification();
+  }
+}
+
 export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): UsePomodoroReturn {
   const [sessionType, setSessionType] = useState<SessionType>('work');
   const [timeRemaining, setTimeRemaining] = useState<number>(sessionDuration('work', settings));
@@ -130,6 +152,7 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
 
     cancelScheduledNotifications();
     cancelAlarmActivity();
+    cancelCountdownNotification();
     if (shouldNotify) {
       playSound(current === 'work' ? 'work' : 'break', current === 'work' ? soundAssets.work : soundAssets.break);
       // On Android, AlarmService already posted the notification — skip to avoid duplicates
@@ -195,6 +218,7 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
         new Date(endTimeRef.current),
         sessionTypeRef.current
       );
+      showCountdownNotification(endTimeRef.current, sessionDuration(sessionTypeRef.current, settingsRef.current) * 1000, sessionTypeRef.current);
       intervalRef.current = setInterval(tick, 500);
     } else {
       if (intervalRef.current) {
@@ -203,6 +227,7 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
       }
       cancelScheduledNotifications();
       cancelAlarmActivity();
+      cancelCountdownNotification();
       // Persist remaining time into endTime offset for next resume
       endTimeRef.current = null;
     }
@@ -269,6 +294,7 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
         new Date(endTimeRef.current),
         sessionTypeRef.current
       );
+      showCountdownNotification(endTimeRef.current, sessionDuration(sessionTypeRef.current, settingsRef.current) * 1000, sessionTypeRef.current);
     } else {
       endTimeRef.current = null;
     }

@@ -34,6 +34,11 @@ const KOTLIN_FILES = [
   'FullScreenIntentPackage.kt',
 ];
 
+const LAYOUT_FILES = [
+  'notification_countdown_work.xml',
+  'notification_countdown_break.xml',
+];
+
 function writeNativeModuleFiles(platformProjectRoot, packageName) {
   const packagePath = packageName.split('.').join(path.sep);
   const destDir = path.join(platformProjectRoot, 'app', 'src', 'main', 'java', packagePath);
@@ -44,6 +49,12 @@ function writeNativeModuleFiles(platformProjectRoot, packageName) {
     const contents = fs.readFileSync(path.join(srcDir, fileName), 'utf8')
       .replace('package PACKAGE_NAME', `package ${packageName}`);
     fs.writeFileSync(path.join(destDir, fileName), contents);
+  }
+
+  const layoutDir = path.join(platformProjectRoot, 'app', 'src', 'main', 'res', 'layout');
+  fs.mkdirSync(layoutDir, { recursive: true });
+  for (const fileName of LAYOUT_FILES) {
+    fs.copyFileSync(path.join(srcDir, fileName), path.join(layoutDir, fileName));
   }
 }
 

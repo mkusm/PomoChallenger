@@ -113,6 +113,7 @@ class AlarmService : Service() {
       .setAutoCancel(false)
       .build()
     nm.notify(ALARM_NOTIF_ID, alarmNotif)
+    nm.cancel(AlarmSoundModule.COUNTDOWN_NOTIF_ID)  // dismiss the running countdown
 
     // Block JS play() before the activity starts so there's no race-condition double sound
     AlarmSoundModule.alarmActivityShowing = true
