@@ -82,22 +82,24 @@ class AlarmService : Service() {
       startForeground(SVC_NOTIF_ID, silentNotif)
     }
 
-    // PendingIntent that opens AlarmActivity when the user taps the notification
+    // Choose notification channel based on keyguard state:
+    //   Locked   → FSI_CHANNEL_ID (silent, IMPORTANCE_HIGH): FSI delivers AlarmActivity, which plays sound
+    //   Unlocked → alarm channel (IMPORTANCE_MAX, USAGE_ALARM sound): shows as heads-up with sound
+    // This avoids double sound when locked (notification + MediaPlayer) while ensuring sound when unlocked.
+    val isLocked = (getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager).isKeyguardLocked
+
+    // PendingIntent that opens AlarmActivity when the user taps the notification.
+    // When unlocked the notification channel already played the sound, so tell AlarmActivity to skip it.
     val activityPi = PendingIntent.getActivity(
       this, 0,
       Intent(this, AlarmActivity::class.java).apply {
         setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         putExtra("title", title)
         putExtra("body",  body)
+        putExtra("skipSound", !isLocked)
       },
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
-
-    // Choose notification channel based on keyguard state:
-    //   Locked   → FSI_CHANNEL_ID (silent, IMPORTANCE_HIGH): FSI delivers AlarmActivity, which plays sound
-    //   Unlocked → alarm channel (IMPORTANCE_MAX, USAGE_ALARM sound): shows as heads-up with sound
-    // This avoids double sound when locked (notification + MediaPlayer) while ensuring sound when unlocked.
-    val isLocked = (getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager).isKeyguardLocked
     val isBreak = body.startsWith("Break")
     val notifChannel = if (isLocked) FSI_CHANNEL_ID else if (isBreak) BREAK_CHANNEL_ID else WORK_CHANNEL_ID
 

@@ -32,6 +32,7 @@ const KOTLIN_FILES = [
   'AlarmSoundModule.kt',
   'FullScreenIntentModule.kt',
   'FullScreenIntentPackage.kt',
+  'PomoBroadcastReceiver.kt',
 ];
 
 const LAYOUT_FILES = [
@@ -96,6 +97,7 @@ module.exports = function withFullScreenIntent(config) {
   // Register AlarmActivity + AlarmService; set lock-screen flags on MainActivity
   config = withAndroidManifest(config, (config) => {
     const app = config.modResults.manifest.application?.[0];
+    const packageName = config.android?.package ?? 'com.example.app';
 
     const mainActivity = app?.activity?.find((a) => a.$['android:name'] === '.MainActivity');
     if (mainActivity) {
@@ -123,6 +125,24 @@ module.exports = function withFullScreenIntent(config) {
           'android:exported': 'false',
           'android:foregroundServiceType': 'mediaPlayback',
         },
+      });
+    }
+
+    app.receiver = app.receiver ?? [];
+    if (!app.receiver.find((r) => r.$['android:name'] === '.PomoBroadcastReceiver')) {
+      app.receiver.push({
+        $: {
+          'android:name': '.PomoBroadcastReceiver',
+          'android:exported': 'false',
+        },
+        'intent-filter': [
+          {
+            action: [
+              { $: { 'android:name': `${packageName}.PAUSE_TIMER` } },
+              { $: { 'android:name': `${packageName}.RESUME_TIMER` } },
+            ],
+          },
+        ],
       });
     }
 

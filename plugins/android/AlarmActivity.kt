@@ -81,10 +81,17 @@ class AlarmActivity : Activity() {
 
     setContentView(root)
 
-    playAlarmSound(if (isBreak) "ding.wav" else "ding2.wav")
-
-    // Fallback auto-dismiss after 5 s in case sound completion never fires
-    Handler(Looper.getMainLooper()).postDelayed({ if (!isFinishing) dismissAlarm() }, 5_000)
+    // skipSound is true when screen was unlocked at alarm time — the notification channel
+    // already played the sound, so AlarmActivity should not play a second one.
+    val skipSound = intent.getBooleanExtra("skipSound", false)
+    if (skipSound) {
+      // No sound to wait for — dismiss immediately
+      dismissAlarm()
+    } else {
+      playAlarmSound(if (isBreak) "ding.wav" else "ding2.wav")
+      // Fallback auto-dismiss after 5 s in case sound completion never fires
+      Handler(Looper.getMainLooper()).postDelayed({ if (!isFinishing) dismissAlarm() }, 5_000)
+    }
   }
 
   private fun dismissAlarm() {

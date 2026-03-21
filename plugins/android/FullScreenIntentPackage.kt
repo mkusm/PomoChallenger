@@ -6,7 +6,8 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.uimanager.ViewManager
 
 class FullScreenIntentPackage : ReactPackage {
-  override fun createNativeModules(ctx: ReactApplicationContext): List<NativeModule> =
-    listOf(FullScreenIntentModule(ctx), AlarmSoundModule(ctx))
-  override fun createViewManagers(ctx: ReactApplicationContext): List<ViewManager<*, *>> = emptyList()
+  @Deprecated("Deprecated in ReactPackage", replaceWith = ReplaceWith(""))
+  override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> =
+    listOf(FullScreenIntentModule(reactContext), AlarmSoundModule(reactContext))
+  override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> = emptyList()
 }

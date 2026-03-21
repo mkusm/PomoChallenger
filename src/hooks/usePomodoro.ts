@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { AppState, AppStateStatus, NativeModules, Platform } from 'react-native';
+import { AppState, AppStateStatus, DeviceEventEmitter, NativeModules, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { Audio } from 'expo-av';
 import { SessionType, Settings } from '../types';
@@ -109,6 +109,12 @@ function showCountdownNotification(endTimeMs: number, totalDurationMs: number, s
 function cancelCountdownNotification() {
   if (Platform.OS === 'android' && NativeModules.AlarmSound) {
     NativeModules.AlarmSound.cancelCountdownNotification();
+  }
+}
+
+function pauseCountdownNotification(remainingMs: number) {
+  if (Platform.OS === 'android' && NativeModules.AlarmSound) {
+    NativeModules.AlarmSound.pauseCountdownNotification(remainingMs);
   }
 }
 
@@ -227,7 +233,6 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
       }
       cancelScheduledNotifications();
       cancelAlarmActivity();
-      cancelCountdownNotification();
       // Persist remaining time into endTime offset for next resume
       endTimeRef.current = null;
     }
@@ -248,6 +253,10 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
     return () => sub.remove();
   }, [tick]);
 
+  // Listen for Pause/Resume taps from the countdown notification action buttons
+  const pauseRef = useRef<(() => void) | null>(null);
+  const startRef = useRef<(() => void) | null>(null);
+
   const start = useCallback(() => {
     // endTimeRef is set fresh in the isRunning effect
     setIsRunning(true);
@@ -257,13 +266,27 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
     // Save remaining time so resume continues from where we left off
     if (endTimeRef.current) {
       const remaining = Math.ceil((endTimeRef.current - Date.now()) / 1000);
-      setTimeRemaining(Math.max(0, remaining));
+      const clamped = Math.max(0, remaining);
+      setTimeRemaining(clamped);
+      pauseCountdownNotification(clamped * 1000);
     }
     endTimeRef.current = null;
     setIsRunning(false);
   }, []);
 
+  // Keep refs up to date so the notification button listener always calls the latest callbacks
+  pauseRef.current = pause;
+  startRef.current = start;
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const pauseSub  = DeviceEventEmitter.addListener('POMO_PAUSE',  () => { if (isRunningRef.current)  pauseRef.current?.(); });
+    const resumeSub = DeviceEventEmitter.addListener('POMO_RESUME', () => { if (!isRunningRef.current) startRef.current?.(); });
+    return () => { pauseSub.remove(); resumeSub.remove(); };
+  }, []);
+
   const reset = useCallback(() => {
+    cancelCountdownNotification();
     endTimeRef.current = null;
     setIsRunning(false);
     setTimeRemaining(sessionDuration(sessionTypeRef.current, settingsRef.current));
