@@ -32,7 +32,7 @@ async function playSound(type: 'work' | 'break', asset: ReturnType<typeof requir
 
 interface UsePomodoroOptions {
   settings: Settings;
-  onBreakStart: () => void;
+  onBreakStart: (breakType: SessionType) => void;
 }
 
 interface UsePomodoroReturn {
@@ -200,7 +200,7 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
       nextDuration = sessionDuration(nextType, settingsRef.current);
       setSessionType(nextType);
       setTimeRemaining(nextDuration);
-      onBreakStart();
+      onBreakStart(nextType);
     } else {
       nextType = 'work';
       nextDuration = sessionDuration('work', settingsRef.current);

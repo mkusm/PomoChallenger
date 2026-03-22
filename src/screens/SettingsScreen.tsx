@@ -126,7 +126,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <KeyboardAvoidingView
         style={styles.inner}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -186,6 +186,19 @@ export default function SettingsScreen() {
                 onValueChange={(v) => { persist({ persistentNotification: v }); }}
                 trackColor={{ false: '#DDD', true: '#FFCDD2' }}
                 thumbColor={settings.persistentNotification ? '#E53935' : '#fff'}
+              />
+            </View>
+            <View style={styles.divider} />
+            <View style={styles.field}>
+              <View style={styles.fieldLeft}>
+                <Text style={styles.fieldLabel}>Diverse challenges</Text>
+                <Text style={styles.fieldDesc}>Bias next challenge toward a different group</Text>
+              </View>
+              <Switch
+                value={settings.diverseGroups}
+                onValueChange={(v) => { persist({ diverseGroups: v }); }}
+                trackColor={{ false: '#DDD', true: '#FFCDD2' }}
+                thumbColor={settings.diverseGroups ? '#E53935' : '#fff'}
               />
             </View>
           </View>

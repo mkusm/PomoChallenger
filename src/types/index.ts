@@ -6,6 +6,7 @@ export interface Settings {
   longBreakDuration: number;  // minutes
   autoStart: boolean;
   persistentNotification: boolean;
+  diverseGroups: boolean;
 }
 
 export interface PomodoroState {
@@ -19,7 +20,21 @@ export interface Challenge {
   id: string;
   text: string;
   group: string;
+  tags?: string[];
 }
+
+export const CHALLENGE_TAGS = ['long-break-only', 'short-break-only', 'once-a-day'] as const;
+export type ChallengeTag = typeof CHALLENGE_TAGS[number];
+export const TAG_LABELS: Record<ChallengeTag, string> = {
+  'long-break-only': 'Long break',
+  'short-break-only': 'Short break',
+  'once-a-day': 'Once/day',
+};
+export const TAG_COLORS: Record<ChallengeTag, string> = {
+  'long-break-only': '#1E88E5',
+  'short-break-only': '#43A047',
+  'once-a-day': '#FB8C00',
+};
 
 export const DEFAULT_SETTINGS: Settings = {
   workDuration: 25,
@@ -27,6 +42,7 @@ export const DEFAULT_SETTINGS: Settings = {
   longBreakDuration: 15,
   autoStart: false,
   persistentNotification: false,
+  diverseGroups: true,
 };
 
 export const DEFAULT_GROUPS: string[] = ['Fitness', 'Home'];

@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { loadChallenges, saveChallenges, loadGroups, saveGroups } from '../storage/storage';
-import { Challenge } from '../types';
+import { Challenge, CHALLENGE_TAGS, TAG_LABELS, TAG_COLORS, ChallengeTag } from '../types';
 
 function uid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -41,33 +41,110 @@ function InputModal({
 }) {
   return (
     <Modal visible={visible} animationType="slide" transparent>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalCard}>
-          <Text style={styles.modalTitle}>{title}</Text>
-          <TextInput
-            style={styles.modalInput}
-            value={value}
-            onChangeText={onChange}
-            placeholder={placeholder}
-            placeholderTextColor="#aaa"
-            autoFocus
-            returnKeyType="done"
-            onSubmitEditing={onConfirm}
-          />
-          <View style={styles.modalActions}>
-            <TouchableOpacity style={styles.modalCancel} onPress={onCancel}>
-              <Text style={styles.modalCancelText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modalConfirm, !value.trim() && styles.modalConfirmDisabled]}
-              onPress={onConfirm}
-              disabled={!value.trim()}
-            >
-              <Text style={styles.modalConfirmText}>{confirmLabel}</Text>
-            </TouchableOpacity>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{title}</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={value}
+              onChangeText={onChange}
+              placeholder={placeholder}
+              placeholderTextColor="#aaa"
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={onConfirm}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancel} onPress={onCancel}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalConfirm, !value.trim() && styles.modalConfirmDisabled]}
+                onPress={onConfirm}
+                disabled={!value.trim()}
+              >
+                <Text style={styles.modalConfirmText}>{confirmLabel}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+// Edit modal: change challenge name + toggle tags
+function EditChallengeModal({
+  visible,
+  name,
+  tags,
+  onChangeName,
+  onToggleTag,
+  onSave,
+  onCancel,
+}: {
+  visible: boolean;
+  name: string;
+  tags: string[];
+  onChangeName: (v: string) => void;
+  onToggleTag: (tag: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Modal visible={visible} animationType="slide" transparent>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Edit Challenge</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={name}
+              onChangeText={onChangeName}
+              placeholder="Challenge name..."
+              placeholderTextColor="#aaa"
+              autoFocus
+              returnKeyType="done"
+            />
+            <Text style={styles.tagSectionLabel}>Tags</Text>
+            <View style={styles.tagRow}>
+              {CHALLENGE_TAGS.map((tag) => {
+                const active = tags.includes(tag);
+                return (
+                  <TouchableOpacity
+                    key={tag}
+                    style={[styles.tagPill, active && { backgroundColor: TAG_COLORS[tag] }]}
+                    onPress={() => onToggleTag(tag)}
+                  >
+                    <Text style={[styles.tagPillText, active && styles.tagPillTextActive]}>
+                      {TAG_LABELS[tag]}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancel} onPress={onCancel}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalConfirm, !name.trim() && styles.modalConfirmDisabled]}
+                onPress={onSave}
+                disabled={!name.trim()}
+              >
+                <Text style={styles.modalConfirmText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -83,6 +160,11 @@ export default function ChallengesScreen() {
   // Add-group modal state
   const [groupModalVisible, setGroupModalVisible] = useState(false);
   const [groupInput, setGroupInput] = useState('');
+
+  // Edit-challenge modal state
+  const [editingChallenge, setEditingChallenge] = useState<Challenge | null>(null);
+  const [editText, setEditText] = useState('');
+  const [editTags, setEditTags] = useState<string[]>([]);
 
   useFocusEffect(
     useCallback(() => {
@@ -116,6 +198,30 @@ export default function ChallengesScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: () => persistChallenges(challenges.filter((c) => c.id !== id)) },
     ]);
+  };
+
+  const openEdit = (item: Challenge) => {
+    setEditingChallenge(item);
+    setEditText(item.text);
+    setEditTags(item.tags ?? []);
+  };
+
+  const toggleEditTag = (tag: string) => {
+    setEditTags((prev) => {
+      if (prev.includes(tag)) return prev.filter((t) => t !== tag);
+      // Turning on one break-type tag clears the other
+      if (tag === 'long-break-only') return [...prev.filter((t) => t !== 'short-break-only'), tag];
+      if (tag === 'short-break-only') return [...prev.filter((t) => t !== 'long-break-only'), tag];
+      return [...prev, tag];
+    });
+  };
+
+  const saveEdit = () => {
+    if (!editingChallenge || !editText.trim()) return;
+    persistChallenges(challenges.map((c) =>
+      c.id === editingChallenge.id ? { ...c, text: editText.trim(), tags: editTags.length > 0 ? editTags : undefined } : c
+    ));
+    setEditingChallenge(null);
   };
 
   const addGroup = () => {
@@ -158,12 +264,9 @@ export default function ChallengesScreen() {
   }, [groups, challenges]);
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        style={styles.inner}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={80}
-      >
+    // edges excludes bottom to avoid double safe-area padding with the tab bar
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <View style={styles.inner}>
         <View style={styles.header}>
           <Text style={styles.heading}>Break Challenges</Text>
           <TouchableOpacity style={styles.addGroupBtn} onPress={() => setGroupModalVisible(true)}>
@@ -174,7 +277,7 @@ export default function ChallengesScreen() {
         <SectionList
           sections={sections}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={{ paddingBottom: 24 }}
+          contentContainerStyle={{ paddingBottom: 16 }}
           renderSectionHeader={({ section: { group, data } }) => (
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>{group}</Text>
@@ -190,12 +293,30 @@ export default function ChallengesScreen() {
             </View>
           )}
           renderItem={({ item }) => (
-            <View style={styles.row}>
-              <Text style={styles.challengeText} numberOfLines={2}>{item.text}</Text>
+            <TouchableOpacity
+              style={styles.row}
+              onPress={() => openEdit(item)}
+              activeOpacity={0.8}
+            >
+              <View style={styles.rowContent}>
+                <Text style={styles.challengeText} numberOfLines={2}>{item.text}</Text>
+                {(item.tags ?? []).length > 0 && (
+                  <View style={styles.rowTagRow}>
+                    {item.tags!.map((tag) => (
+                      <View
+                        key={tag}
+                        style={[styles.rowTagPill, { backgroundColor: TAG_COLORS[tag as ChallengeTag] ?? '#999' }]}
+                      >
+                        <Text style={styles.rowTagText}>{TAG_LABELS[tag as ChallengeTag] ?? tag}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
               <TouchableOpacity onPress={() => deleteChallenge(item.id, item.text)} style={styles.deleteBtn}>
                 <Text style={styles.deleteBtnText}>✕</Text>
               </TouchableOpacity>
-            </View>
+            </TouchableOpacity>
           )}
           renderSectionFooter={({ section: { data } }) =>
             data.length === 0 ? (
@@ -208,7 +329,7 @@ export default function ChallengesScreen() {
             <Text style={styles.empty}>No groups yet. Tap "+ Group" to create one.</Text>
           }
         />
-      </KeyboardAvoidingView>
+      </View>
 
       <InputModal
         visible={!!addingToGroup}
@@ -230,6 +351,16 @@ export default function ChallengesScreen() {
         confirmLabel="Create"
         onConfirm={addGroup}
         onCancel={() => { setGroupModalVisible(false); setGroupInput(''); }}
+      />
+
+      <EditChallengeModal
+        visible={!!editingChallenge}
+        name={editText}
+        tags={editTags}
+        onChangeName={setEditText}
+        onToggleTag={toggleEditTag}
+        onSave={saveEdit}
+        onCancel={() => setEditingChallenge(null)}
       />
     </SafeAreaView>
   );
@@ -284,7 +415,15 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     elevation: 1,
   },
-  challengeText: { flex: 1, fontSize: 15, color: '#222' },
+  rowContent: { flex: 1 },
+  challengeText: { fontSize: 15, color: '#222' },
+  rowTagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 6 },
+  rowTagPill: {
+    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  rowTagText: { color: '#fff', fontSize: 11, fontWeight: '600' },
   deleteBtn: { padding: 6, marginLeft: 8 },
   deleteBtnText: { color: '#ccc', fontSize: 15, fontWeight: '700' },
   emptySection: { paddingVertical: 12, paddingHorizontal: 4 },
@@ -313,6 +452,25 @@ const styles = StyleSheet.create({
     color: '#222',
     marginBottom: 20,
   },
+  tagSectionLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#999',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 10,
+  },
+  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 24 },
+  tagPill: {
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1.5,
+    borderColor: '#DDD',
+    backgroundColor: '#F5F5F5',
+  },
+  tagPillText: { fontSize: 13, fontWeight: '600', color: '#888' },
+  tagPillTextActive: { color: '#fff' },
   modalActions: { flexDirection: 'row', gap: 12 },
   modalCancel: {
     flex: 1,
