@@ -175,6 +175,19 @@ export default function SettingsScreen() {
                 thumbColor={settings.autoStart ? '#E53935' : '#fff'}
               />
             </View>
+            <View style={styles.divider} />
+            <View style={styles.field}>
+              <View style={styles.fieldLeft}>
+                <Text style={styles.fieldLabel}>Always-on notification</Text>
+                <Text style={styles.fieldDesc}>Keep notification visible between sessions</Text>
+              </View>
+              <Switch
+                value={settings.persistentNotification}
+                onValueChange={(v) => { persist({ persistentNotification: v }); }}
+                trackColor={{ false: '#DDD', true: '#FFCDD2' }}
+                thumbColor={settings.persistentNotification ? '#E53935' : '#fff'}
+              />
+            </View>
           </View>
 
           <TouchableOpacity style={styles.resetBtn} onPress={handleReset}>

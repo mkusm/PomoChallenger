@@ -244,6 +244,62 @@ class AlarmSoundModule(private val ctx: ReactApplicationContext) : ReactContextB
     } catch (_: Exception) {}
   }
 
+  // Show a static "ready to start" notification when the timer is idle (not running).
+  // Uses the same notification ID as the countdown so they never stack.
+  @ReactMethod
+  fun showIdleNotification(label: String, timeText: String, isBreak: Boolean) {
+    try {
+      stopCountdownHandler()
+      cdIsActive = false
+      val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(COUNTDOWN_CHANNEL_ID) == null) {
+        NotificationChannel(COUNTDOWN_CHANNEL_ID, "Timer countdown", NotificationManager.IMPORTANCE_LOW).also {
+          it.setSound(null, null)
+          it.enableVibration(false)
+          it.lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+          nm.createNotificationChannel(it)
+        }
+      }
+      val tapPi = PendingIntent.getActivity(
+        ctx, COUNTDOWN_NOTIF_ID,
+        ctx.packageManager.getLaunchIntentForPackage(ctx.packageName) ?: Intent(),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+      )
+      val layoutId = if (isBreak) {
+        ctx.resources.getIdentifier("notification_countdown_break", "layout", ctx.packageName)
+      } else {
+        ctx.resources.getIdentifier("notification_countdown_work", "layout", ctx.packageName)
+      }
+      val progressId = ctx.resources.getIdentifier("cd_progress", "id", ctx.packageName)
+      val textId     = ctx.resources.getIdentifier("cd_text",     "id", ctx.packageName)
+      val buttonId   = ctx.resources.getIdentifier("cd_button",   "id", ctx.packageName)
+      val views = RemoteViews(ctx.packageName, layoutId)
+      views.setProgressBar(progressId, 1000, 1000, false)
+      views.setFloat(progressId, "setScaleX", -1f)
+      views.setTextViewText(textId, timeText)
+      views.setImageViewResource(buttonId, android.R.drawable.ic_media_play)
+      val resumeIntent = Intent("${ctx.packageName}$ACTION_RESUME").setPackage(ctx.packageName)
+      val resumePi = PendingIntent.getBroadcast(
+        ctx, RESUME_REQUEST_CODE, resumeIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+      )
+      views.setOnClickPendingIntent(buttonId, resumePi)
+      val notif = NotificationCompat.Builder(ctx, COUNTDOWN_CHANNEL_ID)
+        .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+        .setContentTitle(label)
+        .setOngoing(true)
+        .setSilent(true)
+        .setOnlyAlertOnce(true)
+        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+        .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+        .setCustomContentView(views)
+        .setCustomBigContentView(views)
+        .setContentIntent(tapPi)
+        .build()
+      nm.notify(COUNTDOWN_NOTIF_ID, notif)
+    } catch (_: Exception) {}
+  }
+
   @ReactMethod
   fun cancelAlarm() {
     try {

@@ -112,6 +112,18 @@ function cancelCountdownNotification() {
   }
 }
 
+function showIdleNotification(label: string, timeText: string, isBreak: boolean) {
+  if (Platform.OS === 'android' && NativeModules.AlarmSound) {
+    NativeModules.AlarmSound.showIdleNotification(label, timeText, isBreak);
+  }
+}
+
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
 function pauseCountdownNotification(remainingMs: number) {
   if (Platform.OS === 'android' && NativeModules.AlarmSound) {
     NativeModules.AlarmSound.pauseCountdownNotification(remainingMs);
@@ -158,7 +170,9 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
 
     cancelScheduledNotifications();
     cancelAlarmActivity();
-    cancelCountdownNotification();
+    if (!settingsRef.current.persistentNotification) {
+      cancelCountdownNotification();
+    }
     if (shouldNotify) {
       playSound(current === 'work' ? 'work' : 'break', current === 'work' ? soundAssets.work : soundAssets.break);
       // On Android, AlarmService already posted the notification — skip to avoid duplicates
@@ -177,16 +191,25 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
     endTimeRef.current = null;
     const autoStart = settingsRef.current.autoStart;
 
+    let nextType: SessionType;
+    let nextDuration: number;
     if (current === 'work') {
       const newCount = completed + 1;
       setCompletedPomodoros(newCount);
-      const next: SessionType = newCount % 4 === 0 ? 'longBreak' : 'shortBreak';
-      setSessionType(next);
-      setTimeRemaining(sessionDuration(next, settingsRef.current));
+      nextType = newCount % 4 === 0 ? 'longBreak' : 'shortBreak';
+      nextDuration = sessionDuration(nextType, settingsRef.current);
+      setSessionType(nextType);
+      setTimeRemaining(nextDuration);
       onBreakStart();
     } else {
-      setSessionType('work');
-      setTimeRemaining(sessionDuration('work', settingsRef.current));
+      nextType = 'work';
+      nextDuration = sessionDuration('work', settingsRef.current);
+      setSessionType(nextType);
+      setTimeRemaining(nextDuration);
+    }
+
+    if (settingsRef.current.persistentNotification && !autoStart) {
+      showIdleNotification(sessionCountdownLabel(nextType), formatDuration(nextDuration), nextType !== 'work');
     }
 
     // Force a false→true transition so the isRunning effect always re-fires when auto-starting.
@@ -242,6 +265,18 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRunning]);
 
+  // Show or hide idle notification when persistentNotification setting changes
+  useEffect(() => {
+    if (isRunningRef.current) return;
+    if (settings.persistentNotification) {
+      const dur = sessionDuration(sessionTypeRef.current, settingsRef.current);
+      showIdleNotification(sessionCountdownLabel(sessionTypeRef.current), formatDuration(dur), sessionTypeRef.current !== 'work');
+    } else {
+      cancelCountdownNotification();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.persistentNotification]);
+
   // When app returns to foreground while running, recalc immediately
   useEffect(() => {
     const handler = (nextState: AppStateStatus) => {
@@ -286,10 +321,15 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
   }, []);
 
   const reset = useCallback(() => {
-    cancelCountdownNotification();
     endTimeRef.current = null;
     setIsRunning(false);
-    setTimeRemaining(sessionDuration(sessionTypeRef.current, settingsRef.current));
+    const dur = sessionDuration(sessionTypeRef.current, settingsRef.current);
+    setTimeRemaining(dur);
+    if (settingsRef.current.persistentNotification) {
+      showIdleNotification(sessionCountdownLabel(sessionTypeRef.current), formatDuration(dur), sessionTypeRef.current !== 'work');
+    } else {
+      cancelCountdownNotification();
+    }
   }, []);
 
   const skip = useCallback(() => {

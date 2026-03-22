@@ -5,6 +5,7 @@ export interface Settings {
   shortBreakDuration: number; // minutes
   longBreakDuration: number;  // minutes
   autoStart: boolean;
+  persistentNotification: boolean;
 }
 
 export interface PomodoroState {
@@ -25,6 +26,7 @@ export const DEFAULT_SETTINGS: Settings = {
   shortBreakDuration: 5,
   longBreakDuration: 15,
   autoStart: false,
+  persistentNotification: false,
 };
 
 export const DEFAULT_GROUPS: string[] = ['Fitness', 'Home'];
