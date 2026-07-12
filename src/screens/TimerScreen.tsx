@@ -7,10 +7,12 @@ import {
   Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import Slider from '@react-native-community/slider';
 import { usePomodoro } from '../hooks/usePomodoro';
 import { loadSettings, loadChallenges, loadLastGroup, saveLastGroup, loadChallengeDates, saveChallengeDates, loadRecentChallengeIds, saveRecentChallengeIds } from '../storage/storage';
-import { Settings, SessionType, DEFAULT_SETTINGS, Challenge, TAG_LABELS, TAG_COLORS, ChallengeTag } from '../types';
+import { Settings, SessionType, DEFAULT_SETTINGS, Challenge, TAG_LABELS } from '../types';
+import { pickChallenge } from '../logic/pickChallenge';
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -31,48 +33,6 @@ const SESSION_LABELS: Record<SessionType, string> = {
 };
 
 const RECENT_LIMIT = 3;
-
-interface PickChallengeCtx {
-  breakType: 'shortBreak' | 'longBreak';
-  usedToday: Record<string, string>;
-  today: string;
-  diverseGroups: boolean;
-  lastGroup?: string;
-  recentIds: string[];
-}
-
-function pickChallenge(challenges: Challenge[], ctx: PickChallengeCtx): Challenge | null {
-  if (challenges.length === 0) return null;
-
-  let eligible = challenges.filter((c) => {
-    const tags = c.tags ?? [];
-    if (tags.includes('long-break-only') && ctx.breakType !== 'longBreak') return false;
-    if (tags.includes('short-break-only') && ctx.breakType !== 'shortBreak') return false;
-    if (tags.includes('once-a-day') && ctx.usedToday[c.id] === ctx.today) return false;
-    return true;
-  });
-
-  // Exclude recently shown challenges, but fall back to full eligible set if needed
-  const nonRecent = eligible.filter((c) => !ctx.recentIds.includes(c.id));
-  if (nonRecent.length > 0) eligible = nonRecent;
-
-  if (eligible.length === 0) return null;
-
-  if (!ctx.diverseGroups) {
-    return eligible[Math.floor(Math.random() * eligible.length)];
-  }
-
-  const groups = [...new Set(eligible.map((c) => c.group))];
-  if (groups.length <= 1 || !ctx.lastGroup) {
-    return eligible[Math.floor(Math.random() * eligible.length)];
-  }
-
-  const different = eligible.filter((c) => c.group !== ctx.lastGroup);
-  const same = eligible.filter((c) => c.group === ctx.lastGroup);
-  const useDifferent = Math.random() < 0.75 && different.length > 0;
-  const pool = useDifferent ? different : same;
-  return pool[Math.floor(Math.random() * pool.length)];
-}
 
 export default function TimerScreen() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
@@ -97,26 +57,33 @@ export default function TimerScreen() {
     });
   }, []);
 
-  useEffect(() => {
-    refreshData();
-    const interval = setInterval(refreshData, 1000);
-    loadLastGroup().then((g) => { lastGroupRef.current = g; });
-    loadChallengeDates().then((d) => { challengeDatesRef.current = d; });
-    loadRecentChallengeIds().then((ids) => { recentIdsRef.current = ids; });
-    return () => clearInterval(interval);
-  }, [refreshData]);
-
-  const recordRecentChallenge = useCallback((id: string) => {
-    const updated = [id, ...recentIdsRef.current.filter((r) => r !== id)].slice(0, RECENT_LIMIT);
-    recentIdsRef.current = updated;
-    saveRecentChallengeIds(updated);
+  const refreshHistoryRefs = useCallback(() => {
+    Promise.all([loadLastGroup(), loadChallengeDates(), loadRecentChallengeIds()])
+      .then(([g, d, ids]) => {
+        lastGroupRef.current = g;
+        challengeDatesRef.current = d;
+        recentIdsRef.current = ids;
+      });
   }, []);
 
-  const markChallengeUsed = useCallback((id: string) => {
+  // Reload settings/challenges when the Timer tab regains focus, instead of polling every
+  // second. Settings and challenge history only change from the other tabs, so focus is the
+  // right trigger; the JSON guard in refreshData avoids resetting live timer state.
+  useFocusEffect(
+    useCallback(() => {
+      refreshData();
+      refreshHistoryRefs();
+    }, [refreshData, refreshHistoryRefs])
+  );
+
+  const recordChallengeShown = useCallback((id: string) => {
     const today = new Date().toISOString().slice(0, 10);
-    const updated = { ...challengeDatesRef.current, [id]: today };
-    challengeDatesRef.current = updated;
-    saveChallengeDates(updated);
+    const recentIds = [id, ...recentIdsRef.current.filter((r) => r !== id)].slice(0, RECENT_LIMIT);
+    const dates = { ...challengeDatesRef.current, [id]: today };
+    recentIdsRef.current = recentIds;
+    challengeDatesRef.current = dates;
+    saveRecentChallengeIds(recentIds);
+    saveChallengeDates(dates);
   }, []);
 
   const handleBreakStart = useCallback((breakType: SessionType) => {
@@ -134,12 +101,11 @@ export default function TimerScreen() {
         setCurrentChallenge(challenge);
         lastGroupRef.current = challenge.group;
         saveLastGroup(challenge.group);
-        markChallengeUsed(challenge.id);
-        recordRecentChallenge(challenge.id);
+        recordChallengeShown(challenge.id);
         setChallengeModalVisible(true);
       }
     });
-  }, [markChallengeUsed, recordRecentChallenge]);
+  }, [recordChallengeShown]);
 
   const { sessionType, timeRemaining, isRunning, completedPomodoros, sessionDurationSeconds, start, pause, reset, skip, seekTo, scrubTo } =
     usePomodoro({ settings, onBreakStart: handleBreakStart });
@@ -162,12 +128,15 @@ export default function TimerScreen() {
       setCurrentChallenge(next);
       if (next.group !== lastGroupRef.current) saveLastGroup(next.group);
       lastGroupRef.current = next.group;
-      markChallengeUsed(next.id);
-      recordRecentChallenge(next.id);
+      recordChallengeShown(next.id);
     }
   };
 
   const color = SESSION_COLORS[sessionType];
+  // The slider runs forward (elapsed) while the timer counts down, so value and remaining
+  // are mirror images around the session duration.
+  const sliderToRemaining = (v: number) => sessionDurationSeconds - v + 1;
+  const sliderValue = sessionDurationSeconds - timeRemaining + 1;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: color }]}>
@@ -191,9 +160,9 @@ export default function TimerScreen() {
         style={styles.slider}
         minimumValue={1}
         maximumValue={sessionDurationSeconds}
-        value={sessionDurationSeconds - timeRemaining + 1}
-        onValueChange={(v) => scrubTo(sessionDurationSeconds - v + 1)}
-        onSlidingComplete={(v) => seekTo(sessionDurationSeconds - v + 1)}
+        value={sliderValue}
+        onValueChange={(v) => scrubTo(sliderToRemaining(v))}
+        onSlidingComplete={(v) => seekTo(sliderToRemaining(v))}
         minimumTrackTintColor="rgba(255,255,255,0.9)"
         maximumTrackTintColor="rgba(255,255,255,0.3)"
         thumbTintColor="#fff"
@@ -230,7 +199,7 @@ export default function TimerScreen() {
               <View style={styles.challengeTagRow}>
                 {(currentChallenge?.tags ?? []).map((tag) => (
                   <View key={tag} style={[styles.challengeTagPill, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
-                    <Text style={styles.challengeTagText}>{TAG_LABELS[tag as ChallengeTag] ?? tag}</Text>
+                    <Text style={styles.challengeTagText}>{TAG_LABELS[tag]}</Text>
                   </View>
                 ))}
               </View>

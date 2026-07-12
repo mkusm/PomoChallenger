@@ -12,8 +12,7 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { loadSettings, saveSettings, saveChallenges, saveGroups } from '../storage/storage';
+import { loadSettings, saveSettings, saveChallenges, saveGroups, clearChallengeHistory } from '../storage/storage';
 import { Settings, DEFAULT_SETTINGS, DEFAULT_CHALLENGES, DEFAULT_GROUPS } from '../types';
 import Constants from 'expo-constants';
 
@@ -103,10 +102,15 @@ export default function SettingsScreen() {
           text: 'Reset',
           style: 'destructive',
           onPress: async () => {
-            await AsyncStorage.clear();
-            await saveSettings(DEFAULT_SETTINGS);
-            await saveChallenges(DEFAULT_CHALLENGES);
-            await saveGroups(DEFAULT_GROUPS);
+            // Overwrite the known keys and drop challenge history in one shot. Avoids the
+            // window where AsyncStorage.clear() has run but re-seeding hasn't, which would
+            // leave the app with no groups if it were killed in between.
+            await Promise.all([
+              saveSettings(DEFAULT_SETTINGS),
+              saveChallenges(DEFAULT_CHALLENGES),
+              saveGroups(DEFAULT_GROUPS),
+              clearChallengeHistory(),
+            ]);
             setSettings(DEFAULT_SETTINGS);
             setWork(String(DEFAULT_SETTINGS.workDuration));
             setShortBreak(String(DEFAULT_SETTINGS.shortBreakDuration));
@@ -205,6 +209,21 @@ export default function SettingsScreen() {
 
           <TouchableOpacity style={styles.resetBtn} onPress={handleReset}>
             <Text style={styles.resetBtnText}>Reset to defaults</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.resetBtn, { marginTop: 12 }]}
+            onPress={() =>
+              Alert.alert(
+                'Clear challenge history?',
+                'Resets group diversity and recent challenge tracking. Your challenges are not affected.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Clear', style: 'destructive', onPress: () => clearChallengeHistory() },
+                ]
+              )
+            }
+          >
+            <Text style={styles.resetBtnText}>Clear challenge history</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.factoryResetBtn} onPress={handleFactoryReset}>
             <Text style={styles.factoryResetBtnText}>Clear all data</Text>

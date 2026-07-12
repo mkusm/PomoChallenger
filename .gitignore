@@ -29,6 +29,9 @@ firebase-debug.log
 .DS_Store
 *.pem
 
+# WSL "mark of the web" sidecar files
+*:Zone.Identifier
+
 # local env files
 .env*.local
 

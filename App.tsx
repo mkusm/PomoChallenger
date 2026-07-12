@@ -57,7 +57,7 @@ async function setup() {
     const alarmAudioAttributes = {
       usage: 4,        // AndroidAudioUsage.ALARM
       contentType: 4,  // AndroidAudioContentType.SONIFICATION
-      flags: { enforced: true, requestHardwareAV: false },
+      flags: { enforceAudibility: true, requestHardwareAudioVideoSynchronization: false },
     };
     await Notifications.setNotificationChannelAsync(CHANNEL_WORK, {
       name: 'Work session end',

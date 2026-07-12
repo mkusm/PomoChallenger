@@ -89,9 +89,9 @@ function EditChallengeModal({
 }: {
   visible: boolean;
   name: string;
-  tags: string[];
+  tags: ChallengeTag[];
   onChangeName: (v: string) => void;
-  onToggleTag: (tag: string) => void;
+  onToggleTag: (tag: ChallengeTag) => void;
   onSave: () => void;
   onCancel: () => void;
 }) {
@@ -164,7 +164,7 @@ export default function ChallengesScreen() {
   // Edit-challenge modal state
   const [editingChallenge, setEditingChallenge] = useState<Challenge | null>(null);
   const [editText, setEditText] = useState('');
-  const [editTags, setEditTags] = useState<string[]>([]);
+  const [editTags, setEditTags] = useState<ChallengeTag[]>([]);
 
   useFocusEffect(
     useCallback(() => {
@@ -206,7 +206,7 @@ export default function ChallengesScreen() {
     setEditTags(item.tags ?? []);
   };
 
-  const toggleEditTag = (tag: string) => {
+  const toggleEditTag = (tag: ChallengeTag) => {
     setEditTags((prev) => {
       if (prev.includes(tag)) return prev.filter((t) => t !== tag);
       // Turning on one break-type tag clears the other
@@ -302,12 +302,12 @@ export default function ChallengesScreen() {
                 <Text style={styles.challengeText} numberOfLines={2}>{item.text}</Text>
                 {(item.tags ?? []).length > 0 && (
                   <View style={styles.rowTagRow}>
-                    {item.tags!.map((tag) => (
+                    {(item.tags ?? []).map((tag) => (
                       <View
                         key={tag}
-                        style={[styles.rowTagPill, { backgroundColor: TAG_COLORS[tag as ChallengeTag] ?? '#999' }]}
+                        style={[styles.rowTagPill, { backgroundColor: TAG_COLORS[tag] }]}
                       >
-                        <Text style={styles.rowTagText}>{TAG_LABELS[tag as ChallengeTag] ?? tag}</Text>
+                        <Text style={styles.rowTagText}>{TAG_LABELS[tag]}</Text>
                       </View>
                     ))}
                   </View>

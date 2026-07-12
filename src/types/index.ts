@@ -20,7 +20,7 @@ export interface Challenge {
   id: string;
   text: string;
   group: string;
-  tags?: string[];
+  tags?: ChallengeTag[];
 }
 
 export const CHALLENGE_TAGS = ['long-break-only', 'short-break-only', 'once-a-day'] as const;

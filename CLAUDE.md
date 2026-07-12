@@ -12,9 +12,35 @@ npm run android        # Launch on Android device/emulator
 bash build-pomo.sh     # Increments patch version, builds APK, copies to Dropbox. Use this — do NOT run eas build manually.
 ```
 
-`build-pomo.sh` sets up env vars (`ANDROID_HOME`, `ANDROID_NDK_HOME`, `JAVA_HOME`) and runs `eas build --local --clear-cache`. Android SDK at `~/android-sdk`, NDK at `~/android-sdk/ndk/26.1.10909125`, JDK 17 via apt. APK output goes to `build/`.
+`build-pomo.sh` sets up env vars (`ANDROID_HOME`, `ANDROID_NDK_HOME`, `JAVA_HOME`) and runs `eas build --local --clear-cache`. Android SDK at `~/android-sdk`, NDK at `~/android-sdk/ndk/26.1.10909125`, JDK 17 via apt. APK output goes to `build/`. It runs `tsc --noEmit` first and aborts on type errors.
 
-No linter or test suite is configured.
+```bash
+npm run typecheck      # tsc --noEmit
+npm test               # jest (ts-jest; covers pure logic in src/logic)
+```
+
+Tests use a lightweight ts-jest config (`jest.config.js`), not jest-expo — so only pure modules under `src/logic` are covered. Component/native tests would need a separate RN preset. No linter is configured.
+
+## Testing on a physical device (Android, via WSL)
+
+The dev machine is WSL2; the phone (Pixel 8) plugs into Windows. What works:
+
+**Connection — usbipd-win + root adb server.**
+- On Windows: `usbipd bind --busid <X>` (once), then `usbipd attach --wsl --busid <X>` (every reconnect/reboot). Enable **USB debugging** on the phone first — the USB product id must be `18d1:4ee7` (adb present), not `4ee1` (MTP only). After enabling debugging, re-attach so WSL re-enumerates.
+- Attach keeps dropping (`vhci_hcd: connection reset by peer`) if **Phone Link / Android Studio** on Windows grabs the device, or on a USB-3 port. Fix: close Phone Link and use a **USB 2.0 port**.
+- This WSL runs legacy `init` (no systemd → **no udevd**), so usbipd device nodes are root-only (`crw------- root root`). The adb *server* must run as root or `adb devices` is empty: `sudo adb kill-server; sudo adb start-server`. The client (`adb devices`, `adb install`, …) stays as your user. Re-run after each reboot/attach. (`ADB_SERVER_SOCKET` bridging to the Windows adb server does **not** work here — NAT networking can't route to the Windows LAN IP; see the fish-config comment.)
+
+**Driving the UI headlessly.**
+- Screenshot: `adb exec-out screencap -p > shot.png` (use `exec-out`, not `shell screencap`, to avoid CRLF corruption).
+- Precise taps: `adb shell uiautomator dump /sdcard/ui.xml && adb shell cat /sdcard/ui.xml` gives element `bounds="[x1,y1][x2,y2]"` — tap the center. RN `EditText`s show their value as `text=`.
+- Input: `adb shell input tap X Y` / `input text "25"` / `input keyevent KEYCODE_DEL|KEYCODE_MOVE_END|KEYCODE_BACK`. Duration fields commit on blur (`onEndEditing`) — after typing, `KEYCODE_BACK` to close the keyboard, then tap another control to force the commit.
+- Settings persist to AsyncStorage; a release build isn't debuggable so `run-as` can't read it — verify persistence by `am force-stop` + relaunch and reading the UI.
+
+**Testing the alarm quickly.**
+- Set Work to 1 min in Settings so a session ends in ~60s. Turn Auto-start off for a clean single-fire.
+- Lock/sleep: `adb shell input keyevent KEYCODE_SLEEP`; confirm it's really off with `adb shell dumpsys power | grep mWakefulness` (`Dozing`/`Asleep`). **Lock before the session ends** — if the app is foregrounded at end, `AlarmService` bails and JS plays instead, so you're testing the wrong path.
+- Capture with `adb logcat -d`. Key signals: `Background started FGS … AlarmService … ALARM_MANAGER_ALARM_CLOCK` (native alarm fired); `START … com.kusm.pomo/.AlarmActivity` (FSI/locked path taken); **count `MediaPlayer: resetDrmState` — exactly one = single sound, two = double-sound bug**. App logs are under tag `Pomo` (`adb logcat -s Pomo:*`).
+- Long operations (a ~15 min local build) drop the usbip attach when the phone sleeps — enable Developer options → "Stay awake", and re-`usbipd attach` before installing.
 
 ## Architecture
 
@@ -35,10 +61,12 @@ On Android, alarms are handled natively — `expo-notifications` is intentionall
 **Flow when screen is off / app is in background:**
 1. `AlarmSoundModule.scheduleAlarm()` calls `AlarmManager.setAlarmClock()` with a `getForegroundService()` `PendingIntent` targeting `AlarmService`.
 2. `AlarmService` (ForegroundService) starts, acquires a `ACQUIRE_CAUSES_WAKEUP` WakeLock, calls `startForeground()` with a silent notification, then posts an alarm notification with `setFullScreenIntent()`.
-3. If the device is **locked**: posts on `FSI_CHANNEL_ID` (IMPORTANCE_HIGH, silent) — FSI triggers `AlarmActivity` which plays sound via MediaPlayer.
-4. If the device is **unlocked**: posts on the alarm channel (IMPORTANCE_MAX, with sound) — shows as a heads-up notification.
-5. `AlarmService` sets `AlarmSoundModule.alarmActivityShowing = true` before launching the activity, so JS `play()` is skipped (prevents double sound).
+3. If the device is **locked** and full-screen-intent permission is granted (`canUseFullScreenIntent()` on API 34+): posts on `FSI_CHANNEL_ID` (IMPORTANCE_HIGH, silent) — FSI triggers `AlarmActivity` which plays sound via MediaPlayer. This is the "FSI path".
+4. Otherwise (device **unlocked**, or locked but FSI permission denied): posts on the alarm channel (IMPORTANCE_MAX, with sound) — shows as a heads-up notification and the channel plays the sound. The locked-but-denied fallback exists so the alarm is never silent.
+5. Only on the FSI path does `AlarmService` set `AlarmSoundModule.alarmActivityShowing = true` (so JS/activity `play()` is skipped to prevent double sound). On the non-FSI path it sets the flag `false` and, after ~3 s, releases the wakelock and stops the foreground service (the alarm notification, a separate id, stays). The flag is also reset in `scheduleAlarm()`/`cancelAlarm()` so it can never get stuck and mute future sounds.
 6. If the app is **already in the foreground**, `AlarmService` bails immediately — JS handles sound via `expo-av`.
+
+`sessionType`/`isBreak` and the sound filename are passed as explicit intent extras from JS (`scheduleAlarm(..., isBreak)`) through `AlarmService` to `AlarmActivity` — the native side never infers session type from the (localizable) notification body text.
 
 `AlarmActivity` auto-dismisses on sound completion, with a 5s fallback.
 

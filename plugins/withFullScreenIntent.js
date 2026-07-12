@@ -30,6 +30,7 @@ const KOTLIN_FILES = [
   'AlarmService.kt',
   'AlarmActivity.kt',
   'AlarmSoundModule.kt',
+  'CountdownService.kt',
   'FullScreenIntentModule.kt',
   'FullScreenIntentPackage.kt',
   'PomoBroadcastReceiver.kt',
@@ -122,6 +123,17 @@ module.exports = function withFullScreenIntent(config) {
       app.service.push({
         $: {
           'android:name': '.AlarmService',
+          'android:exported': 'false',
+          'android:foregroundServiceType': 'mediaPlayback',
+        },
+      });
+    }
+
+    if (!app?.service?.find?.((s) => s.$['android:name'] === '.CountdownService')) {
+      app.service = app.service ?? [];
+      app.service.push({
+        $: {
+          'android:name': '.CountdownService',
           'android:exported': 'false',
           'android:foregroundServiceType': 'mediaPlayback',
         },

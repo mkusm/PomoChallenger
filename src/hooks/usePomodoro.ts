@@ -74,8 +74,9 @@ async function scheduleEndNotification(title: string, body: string, fireAt: Date
   const sound = sessionType === 'work' ? 'ding2.wav' : 'ding.wav';
   await cancelScheduledNotifications();
   if (Platform.OS === 'android' && NativeModules.AlarmSound) {
-    // On Android, AlarmService handles the notification — skip expo-notifications to avoid duplicates
-    NativeModules.AlarmSound.scheduleAlarm(fireAt.getTime(), title, body, sound);
+    // On Android, AlarmService handles the notification — skip expo-notifications to avoid duplicates.
+    // Pass isBreak explicitly so the native side never has to sniff the (localizable) body text.
+    NativeModules.AlarmSound.scheduleAlarm(fireAt.getTime(), title, body, sound, sessionType !== 'work');
   } else {
     await Notifications.scheduleNotificationAsync({
       content: { title, body, sound },
@@ -167,6 +168,7 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
     // JS timer resumes after the screen turns back on.
     const overdueMs = endTimeRef.current ? Math.max(0, Date.now() - endTimeRef.current) : 0;
     const shouldNotify = notify && overdueMs < 3000;
+    const androidNative = Platform.OS === 'android' && !!NativeModules.AlarmSound;
 
     cancelScheduledNotifications();
     cancelAlarmActivity();
@@ -174,16 +176,24 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
       cancelCountdownNotification();
     }
     if (shouldNotify) {
-      playSound(current === 'work' ? 'work' : 'break', current === 'work' ? soundAssets.work : soundAssets.break);
+      // On Android the native side (AlarmActivity when locked, or the alarm notification channel)
+      // plays the end-of-session sound whenever the app is backgrounded/locked. The countdown
+      // foreground-service keeps this JS timer ticking even while locked, so playing here too would
+      // double the sound. Only play in-app when we're genuinely in the foreground; otherwise let
+      // the native side own it. (overdueMs alone can't tell us — the wakelock wakes JS instantly.)
+      if (!androidNative || AppState.currentState === 'active') {
+        playSound(current === 'work' ? 'work' : 'break', current === 'work' ? soundAssets.work : soundAssets.break);
+      }
       // On Android, AlarmService already posted the notification — skip to avoid duplicates
-      if (Platform.OS !== 'android' || !NativeModules.AlarmSound) {
+      if (!androidNative) {
         Notifications.scheduleNotificationAsync({
           content: {
             title: 'Pomodoro',
             body: sessionLabel(current),
             sound: current === 'work' ? 'ding2.wav' : 'ding.wav',
           },
-          trigger: { channelId: current === 'work' ? CHANNEL_WORK : CHANNEL_BREAK } as any,
+          // iOS-only branch (Android is handled by AlarmService above); fire immediately.
+          trigger: null,
         });
       }
     }

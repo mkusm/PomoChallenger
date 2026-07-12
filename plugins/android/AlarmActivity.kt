@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.ViewGroup
@@ -39,8 +40,9 @@ class AlarmActivity : Activity() {
     }
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-    val body = intent.getStringExtra("body") ?: ""
-    val isBreak = body.startsWith("Break")
+    // Session type and sound are passed explicitly by AlarmService (no body-text sniffing).
+    val isBreak = intent.getBooleanExtra("isBreak", false)
+    val sound = intent.getStringExtra("sound") ?: if (isBreak) "ding.wav" else "ding2.wav"
     val dp = resources.displayMetrics.density
 
     // ── Root layout ──────────────────────────────────────────────────────────
@@ -88,7 +90,7 @@ class AlarmActivity : Activity() {
       // No sound to wait for — dismiss immediately
       dismissAlarm()
     } else {
-      playAlarmSound(if (isBreak) "ding.wav" else "ding2.wav")
+      playAlarmSound(sound)
       // Fallback auto-dismiss after 5 s in case sound completion never fires
       Handler(Looper.getMainLooper()).postDelayed({ if (!isFinishing) dismissAlarm() }, 5_000)
     }
@@ -120,8 +122,9 @@ class AlarmActivity : Activity() {
         start()
         setOnCompletionListener { release(); player = null; runOnUiThread { dismissAlarm() } }
       }
-    } catch (_: Exception) {
+    } catch (e: Exception) {
       // Sound failed to load — dismiss immediately so UI doesn't get stuck
+      Log.w("Pomo", "AlarmActivity sound failed", e)
       dismissAlarm()
     }
   }

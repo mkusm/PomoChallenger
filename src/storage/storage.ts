@@ -39,7 +39,16 @@ export async function loadChallenges(): Promise<Challenge[]> {
       await saveChallenges(migrated);
       return migrated;
     }
-    return parsed as Challenge[];
+    // Guard against corrupt storage: fall back to defaults if the shape is wrong
+    // (an empty array is valid — the user deleted every challenge).
+    if (!Array.isArray(parsed)) return DEFAULT_CHALLENGES;
+    const valid = parsed.every(
+      (c: unknown): c is Challenge =>
+        !!c && typeof (c as Challenge).id === 'string' &&
+        typeof (c as Challenge).text === 'string' &&
+        typeof (c as Challenge).group === 'string'
+    );
+    return valid ? (parsed as Challenge[]) : DEFAULT_CHALLENGES;
   } catch {
     return DEFAULT_CHALLENGES;
   }
@@ -110,4 +119,8 @@ export async function loadRecentChallengeIds(): Promise<string[]> {
 
 export async function saveRecentChallengeIds(ids: string[]): Promise<void> {
   await AsyncStorage.setItem(KEYS.RECENT_CHALLENGES, JSON.stringify(ids));
+}
+
+export async function clearChallengeHistory(): Promise<void> {
+  await AsyncStorage.multiRemove([KEYS.LAST_GROUP, KEYS.CHALLENGE_DATES, KEYS.RECENT_CHALLENGES]);
 }
