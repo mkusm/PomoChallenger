@@ -20,12 +20,13 @@ Implemented and **verified on a physical Pixel 8** over adb (see `CLAUDE.md` →
 - ✅ **§3** ts-jest setup + tests, Kotlin `Log.w` on all catches, `.gitignore`/`package.json` hygiene.
 - ✅ **§4** storage shape-validation, atomic factory reset, `trigger: null`, direct Kotlin class refs, `CountdownService` explicit `isPaused` + progress math, slider helper, unused-import removal.
 - ✅ **§1.7** persist timer state across process death — the running-session snapshot (`endTime`, `sessionType`, `completedPomodoros`, `isRunning`) is saved on every transition and restored on launch. Scoped to only resume a session that was genuinely mid-countdown when killed, so idle/stale states fall through to a fresh start. Verified on-device: force-stop mid-session → reopened → resumed counting from the right remaining time.
-- ✅ **Bonus (found on-device):** locked-screen **double-sound race** — the countdown foreground-service keeps the JS timer ticking while locked, so JS `play()` and `AlarmActivity` both fired. `usePomodoro` now plays the in-app sound only when `AppState.currentState === 'active'`; `AlarmService` sets the guard before the wakelock. Verified 2 → 1 MediaPlayer at the alarm.
+- ✅ **§2.5** foreground-service types — both services were falsely typed `mediaPlayback` (neither plays media through the service). Switched to `specialUse` (+ `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` property + `FOREGROUND_SERVICE_SPECIAL_USE` permission). Verified on-device (Android 16): both services start with **no FGS exceptions**; aapt2 confirms the merged manifest. **Play note:** `specialUse` requires a short justification in the Play Console submission form.
+- ✅ **Bonus (found on-device):** locked-screen **double sound** — the countdown foreground-service keeps the JS timer ticking while locked, so JS `play()` and `AlarmActivity` both fired. An `AppState === 'active'` guard proved *unreliable*: MainActivity is `showWhenLocked`, so the wakelock makes the app read "active" even locked — the race was a coin flip (passed once, failed later). Final fix makes **`AlarmService` the single sound authority**: JS never plays on Android; the service plays in-process when foregrounded, via `AlarmActivity` when locked, or via the notification channel when unlocked. Verified on-device: **exactly 1 MediaPlayer in both the locked and foreground paths** (challenge modal still shows in foreground).
 - ✅ **§2.1 loose end resolved:** changing a duration on Settings now reflects on the Timer immediately — `saveSettings`/`saveChallenges` emit a `DeviceEventEmitter` event that TimerScreen reloads on, closing the blur-commit vs focus-read race. Verified on-device (Timer showed the new value instantly).
 
-**Deferred** (need device iteration or are larger refactors):
+**Deferred** (larger refactors / lower value):
 - §1.6 native next-alarm scheduling.
-- §2.3 dedupe notification builders; §2.4 `usePomodoro` reducer refactor; §2.5 foreground-service-type correctness (**do before next Play submission**); `expo-av` → `expo-audio`.
+- §2.3 dedupe notification builders; §2.4 `usePomodoro` reducer refactor; `expo-av` → `expo-audio`.
 
 ---
 
@@ -115,4 +116,4 @@ Both services declare `foregroundServiceType="mediaPlayback"` (`withFullScreenIn
 3. ✅ Add `tsc --noEmit` to the build script; extract `pickChallenge` and unit-test it. *(ESLint still not configured.)*
 4. ✅ Replace the 1s poll with focus-based reload (blur-commit vs focus-read race later closed with a storage-change event).
 5. ✅ Persist timer state across process death.
-6. ⏳ Address FGS types before targeting SDK 34+ / next Play submission.
+6. ✅ Address FGS types — now `specialUse` (add a one-line justification in the Play Console form at submission).

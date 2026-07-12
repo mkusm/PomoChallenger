@@ -48,32 +48,35 @@ class AlarmService : Service() {
       .setOngoing(true)
       .setSilent(true)
       .build()
-    if (Build.VERSION.SDK_INT >= 29) {
-      startForeground(SVC_NOTIF_ID, silentNotif, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+    if (Build.VERSION.SDK_INT >= 34) {
+      startForeground(SVC_NOTIF_ID, silentNotif, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
     } else {
+      // FGS type isn't enforced before Android 14; the manifest declaration covers those versions.
       startForeground(SVC_NOTIF_ID, silentNotif)
     }
-
-    // If the app is already in the foreground the JS timer handles everything — bail out
-    // to prevent a double sound when the timer ends with the app open.
-    if (isAppInForeground()) {
-      stopForeground(true)
-      stopSelf()
-      return START_NOT_STICKY
-    }
-
-    // App is backgrounded/locked, so the native side owns the end-of-session sound (AlarmActivity
-    // when locked, or the alarm notification channel). Block the JS play() path NOW — before the
-    // wakelock below wakes the screen and lets the JS timer fire its own play() — so the two don't
-    // double up. Reset in scheduleAlarm()/cancelAlarm(), AlarmActivity.onDestroy, or the fallback
-    // cleanup below.
-    AlarmSoundModule.alarmActivityShowing = true
 
     val title = intent?.getStringExtra("title") ?: "Pomodoro"
     val body  = intent?.getStringExtra("body")  ?: ""
     // Session type is passed explicitly (see usePomodoro) — never sniffed from the body text.
     val isBreak = intent?.getBooleanExtra("isBreak", false) ?: false
     val sound = intent?.getStringExtra("sound") ?: if (isBreak) "ding.wav" else "ding2.wav"
+
+    // AlarmService is the single end-of-session sound authority on Android; JS never plays (see
+    // usePomodoro). This removes the JS-vs-native double-sound race: the countdown foreground-
+    // service keeps the JS timer ticking while locked, and JS can't reliably tell it's backgrounded
+    // because MainActivity is showWhenLocked (the wakelock brings it "active" over the keyguard).
+    // If the app is in the foreground, play the sound in-process (JS shows the break UI but stays
+    // silent) and stop — no full-screen activity or notification needed while the app is open.
+    if (isAppInForeground()) {
+      AlarmSoundModule.alarmActivityShowing = false
+      AlarmSoundModule.instance?.play(sound)
+      stopForeground(true)
+      stopSelf()
+      return START_NOT_STICKY
+    }
+
+    // Backgrounded/locked: AlarmActivity (locked) or the notification channel (unlocked) plays.
+    AlarmSoundModule.alarmActivityShowing = true
 
     // Acquire WakeLock with ACQUIRE_CAUSES_WAKEUP so the screen turns on
     val pm = getSystemService(Context.POWER_SERVICE) as PowerManager

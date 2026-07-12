@@ -201,27 +201,21 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
     if (!settingsRef.current.persistentNotification) {
       cancelCountdownNotification();
     }
-    if (shouldNotify) {
-      // On Android the native side (AlarmActivity when locked, or the alarm notification channel)
-      // plays the end-of-session sound whenever the app is backgrounded/locked. The countdown
-      // foreground-service keeps this JS timer ticking even while locked, so playing here too would
-      // double the sound. Only play in-app when we're genuinely in the foreground; otherwise let
-      // the native side own it. (overdueMs alone can't tell us — the wakelock wakes JS instantly.)
-      if (!androidNative || AppState.currentState === 'active') {
-        playSound(current === 'work' ? 'work' : 'break', current === 'work' ? soundAssets.work : soundAssets.break);
-      }
-      // On Android, AlarmService already posted the notification — skip to avoid duplicates
-      if (!androidNative) {
-        Notifications.scheduleNotificationAsync({
-          content: {
-            title: 'Pomodoro',
-            body: sessionLabel(current),
-            sound: current === 'work' ? 'ding2.wav' : 'ding.wav',
-          },
-          // iOS-only branch (Android is handled by AlarmService above); fire immediately.
-          trigger: null,
-        });
-      }
+    // On Android the native AlarmService is the SINGLE sound authority (foreground: in-process
+    // play; locked: AlarmActivity; unlocked: the alarm notification channel). JS never plays or
+    // posts here — that removes the JS-vs-native double-sound race that no AppState/flag guard
+    // could fully close (MainActivity is showWhenLocked, so the app reads "active" even when the
+    // device is locked). This branch is the non-Android (iOS/Expo) path only.
+    if (shouldNotify && !androidNative) {
+      playSound(current === 'work' ? 'work' : 'break', current === 'work' ? soundAssets.work : soundAssets.break);
+      Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Pomodoro',
+          body: sessionLabel(current),
+          sound: current === 'work' ? 'ding2.wav' : 'ding.wav',
+        },
+        trigger: null,
+      });
     }
 
     endTimeRef.current = null;

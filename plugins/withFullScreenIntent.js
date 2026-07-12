@@ -118,14 +118,25 @@ module.exports = function withFullScreenIntent(config) {
       });
     }
 
+    // Both services use foregroundServiceType="specialUse": neither plays media (the alarm sound
+    // comes from AlarmActivity or the notification channel), and there is no standard FGS type for
+    // an alarm/timer. specialUse (API 34+) requires the PROPERTY_SPECIAL_USE_FGS_SUBTYPE property.
     if (!app?.service?.find?.((s) => s.$['android:name'] === '.AlarmService')) {
       app.service = app.service ?? [];
       app.service.push({
         $: {
           'android:name': '.AlarmService',
           'android:exported': 'false',
-          'android:foregroundServiceType': 'mediaPlayback',
+          'android:foregroundServiceType': 'specialUse',
         },
+        property: [
+          {
+            $: {
+              'android:name': 'android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE',
+              'android:value': 'exact-alarm handler that wakes the screen and posts the pomodoro end-of-session alert',
+            },
+          },
+        ],
       });
     }
 
@@ -135,8 +146,16 @@ module.exports = function withFullScreenIntent(config) {
         $: {
           'android:name': '.CountdownService',
           'android:exported': 'false',
-          'android:foregroundServiceType': 'mediaPlayback',
+          'android:foregroundServiceType': 'specialUse',
         },
+        property: [
+          {
+            $: {
+              'android:name': 'android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE',
+              'android:value': 'persistent pomodoro countdown notification while a session is running',
+            },
+          },
+        ],
       });
     }
 

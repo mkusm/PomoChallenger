@@ -58,13 +58,17 @@ On session end, `advanceSession` fires. It checks `overdueMs` (how long ago `end
 
 On Android, alarms are handled natively — `expo-notifications` is intentionally skipped on Android to avoid double-firing.
 
+**`AlarmService` is the single end-of-session sound authority on Android — JS never plays sound.** The countdown foreground-service keeps the JS timer ticking even while locked, and JS can't reliably tell it's backgrounded (MainActivity is `showWhenLocked`, so the wakelock makes `AppState` read `active` even on the lock screen). So sound is routed entirely through `AlarmService`, which picks the mechanism by `isAppInForeground()`: in-process `AlarmSoundModule.play()` when foregrounded, `AlarmActivity` when locked, or the notification channel when unlocked. This removes the JS-vs-native double-sound race. (`advanceSession` in `usePomodoro` still runs the JS UI — e.g. the break-challenge modal — but does not play or post on Android.)
+
 **Flow when screen is off / app is in background:**
 1. `AlarmSoundModule.scheduleAlarm()` calls `AlarmManager.setAlarmClock()` with a `getForegroundService()` `PendingIntent` targeting `AlarmService`.
 2. `AlarmService` (ForegroundService) starts, acquires a `ACQUIRE_CAUSES_WAKEUP` WakeLock, calls `startForeground()` with a silent notification, then posts an alarm notification with `setFullScreenIntent()`.
 3. If the device is **locked** and full-screen-intent permission is granted (`canUseFullScreenIntent()` on API 34+): posts on `FSI_CHANNEL_ID` (IMPORTANCE_HIGH, silent) — FSI triggers `AlarmActivity` which plays sound via MediaPlayer. This is the "FSI path".
 4. Otherwise (device **unlocked**, or locked but FSI permission denied): posts on the alarm channel (IMPORTANCE_MAX, with sound) — shows as a heads-up notification and the channel plays the sound. The locked-but-denied fallback exists so the alarm is never silent.
 5. Only on the FSI path does `AlarmService` set `AlarmSoundModule.alarmActivityShowing = true` (so JS/activity `play()` is skipped to prevent double sound). On the non-FSI path it sets the flag `false` and, after ~3 s, releases the wakelock and stops the foreground service (the alarm notification, a separate id, stays). The flag is also reset in `scheduleAlarm()`/`cancelAlarm()` so it can never get stuck and mute future sounds.
-6. If the app is **already in the foreground**, `AlarmService` bails immediately — JS handles sound via `expo-av`.
+6. If the app is **already in the foreground**, `AlarmService` plays the sound in-process via `AlarmSoundModule.play()` (STREAM_ALARM), then stops — no full-screen activity or notification (the JS UI shows the break challenge). JS stays silent.
+
+Both `AlarmService` and `CountdownService` run as `foregroundServiceType="specialUse"` (not `mediaPlayback` — neither plays media through the *service*; there's no standard FGS type for an alarm/timer). This needs the `FOREGROUND_SERVICE_SPECIAL_USE` permission and a `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` `<property>` on each service (added by the config plugin), and a one-line justification in the Play Console form at submission. `startForeground` passes the `SPECIAL_USE` type only on API 34+ (unenforced below).
 
 `sessionType`/`isBreak` and the sound filename are passed as explicit intent extras from JS (`scheduleAlarm(..., isBreak)`) through `AlarmService` to `AlarmActivity` — the native side never infers session type from the (localizable) notification body text.
 

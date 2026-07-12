@@ -2,7 +2,7 @@
   "expo": {
     "name": "Pomo",
     "slug": "pomo",
-    "version": "1.0.57",
+    "version": "1.0.59",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -31,7 +31,7 @@
         "USE_EXACT_ALARM",
         "WAKE_LOCK",
         "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+        "FOREGROUND_SERVICE_SPECIAL_USE"
       ]
     },
     "plugins": [

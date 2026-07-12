@@ -87,10 +87,11 @@ class CountdownService : Service() {
     pausedRemainingMs = 0
     isPaused = false
 
-    if (Build.VERSION.SDK_INT >= 29) {
+    if (Build.VERSION.SDK_INT >= 34) {
       startForeground(AlarmSoundModule.COUNTDOWN_NOTIF_ID, buildNotif(),
-        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
     } else {
+      // FGS type isn't enforced before Android 14; the manifest declaration covers those versions.
       startForeground(AlarmSoundModule.COUNTDOWN_NOTIF_ID, buildNotif())
     }
     handler.removeCallbacks(tickRunnable)
