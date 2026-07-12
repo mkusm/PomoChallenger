@@ -34,6 +34,51 @@ class CountdownService : Service() {
         }
       }
     }
+
+    // The countdown notification (custom progress-bar layout + play/pause button), shared by the
+    // running service and AlarmSoundModule's idle "ready to start" poster. isPaused=true shows the
+    // resume/play button (also used for the idle state); false shows the pause button.
+    fun buildNotification(
+      ctx: Context, label: String, timeText: String, progress: Int, isBreak: Boolean, isPaused: Boolean,
+    ): android.app.Notification {
+      ensureChannel(ctx)
+      val res = ctx.resources
+      val layoutName = if (isBreak) "notification_countdown_break" else "notification_countdown_work"
+      val progressId = res.getIdentifier("cd_progress", "id", ctx.packageName)
+      val views = RemoteViews(ctx.packageName, res.getIdentifier(layoutName, "layout", ctx.packageName))
+      views.setProgressBar(progressId, 1000, progress, false)
+      views.setFloat(progressId, "setScaleX", -1f)
+      views.setTextViewText(res.getIdentifier("cd_text", "id", ctx.packageName), timeText)
+
+      val action  = if (isPaused) "${ctx.packageName}.RESUME_TIMER" else "${ctx.packageName}.PAUSE_TIMER"
+      val reqCode = if (isPaused) RESUME_REQUEST_CODE else PAUSE_REQUEST_CODE
+      val icon    = if (isPaused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause
+      val actionPi = PendingIntent.getBroadcast(
+        ctx, reqCode, Intent(action).setPackage(ctx.packageName),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+      val buttonId = res.getIdentifier("cd_button", "id", ctx.packageName)
+      views.setImageViewResource(buttonId, icon)
+      views.setOnClickPendingIntent(buttonId, actionPi)
+
+      val tapPi = PendingIntent.getActivity(
+        ctx, AlarmSoundModule.COUNTDOWN_NOTIF_ID,
+        ctx.packageManager.getLaunchIntentForPackage(ctx.packageName) ?: Intent(),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+      return NotificationCompat.Builder(ctx, CHANNEL_ID)
+        .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+        .setContentTitle(label)
+        .setOngoing(true)
+        .setSilent(true)
+        .setOnlyAlertOnce(true)
+        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+        .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+        .setCustomContentView(views)
+        .setCustomBigContentView(views)
+        .setContentIntent(tapPi)
+        .build()
+    }
   }
 
   private var endMs: Long = 0
@@ -44,12 +89,6 @@ class CountdownService : Service() {
   // Tracked explicitly rather than inferred from pausedRemainingMs > 0, so pausing with
   // under a second left still renders as paused.
   private var isPaused: Boolean = false
-
-  private var layoutWorkId: Int = 0
-  private var layoutBreakId: Int = 0
-  private var progressId: Int = 0
-  private var textId: Int = 0
-  private var buttonId: Int = 0
 
   private val handler = Handler(Looper.getMainLooper())
   private val tickRunnable = object : Runnable {
@@ -66,11 +105,6 @@ class CountdownService : Service() {
     super.onCreate()
     instance = this
     ensureChannel(this)
-    layoutWorkId  = resources.getIdentifier("notification_countdown_work",  "layout", packageName)
-    layoutBreakId = resources.getIdentifier("notification_countdown_break", "layout", packageName)
-    progressId    = resources.getIdentifier("cd_progress", "id", packageName)
-    textId        = resources.getIdentifier("cd_text",     "id", packageName)
-    buttonId      = resources.getIdentifier("cd_button",   "id", packageName)
   }
 
   override fun onDestroy() {
@@ -119,42 +153,7 @@ class CountdownService : Service() {
     // Progress bar max is 1000; scale remaining/total into that range.
     val progress = if (totalMs > 0) ((remainingMs * 1000L) / totalMs).toInt() else 0
     val timeText = String.format("%d:%02d", remainingSec / 60, remainingSec % 60)
-
-    val layoutId = if (isBreak) layoutBreakId else layoutWorkId
-    val views = RemoteViews(packageName, layoutId)
-    views.setProgressBar(progressId, 1000, progress, false)
-    views.setFloat(progressId, "setScaleX", -1f)
-    views.setTextViewText(textId, timeText)
-
-    val actionAction = if (isPaused) "$packageName.RESUME_TIMER" else "$packageName.PAUSE_TIMER"
-    val actionCode   = if (isPaused) RESUME_REQUEST_CODE else PAUSE_REQUEST_CODE
-    val actionIcon   = if (isPaused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause
-    val actionIntent = Intent(actionAction).setPackage(packageName)
-    val actionPi = PendingIntent.getBroadcast(
-      this, actionCode, actionIntent,
-      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
-    views.setImageViewResource(buttonId, actionIcon)
-    views.setOnClickPendingIntent(buttonId, actionPi)
-
-    val tapPi = PendingIntent.getActivity(
-      this, AlarmSoundModule.COUNTDOWN_NOTIF_ID,
-      packageManager.getLaunchIntentForPackage(packageName) ?: Intent(),
-      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
-
-    return NotificationCompat.Builder(this, CHANNEL_ID)
-      .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-      .setContentTitle(label)
-      .setOngoing(true)
-      .setSilent(true)
-      .setOnlyAlertOnce(true)
-      .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-      .setStyle(NotificationCompat.DecoratedCustomViewStyle())
-      .setCustomContentView(views)
-      .setCustomBigContentView(views)
-      .setContentIntent(tapPi)
-      .build()
+    return buildNotification(this, label, timeText, progress, isBreak, isPaused)
   }
 
   private fun updateNotification() {

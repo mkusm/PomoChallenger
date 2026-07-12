@@ -156,6 +156,18 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
   settingsRef.current = settings;
   isRunningRef.current = isRunning;
 
+  // Persist the current session snapshot (reads refs, so it's correct from effects and callbacks
+  // alike). Guarded until rehydration so we don't overwrite saved state with mount-time defaults.
+  const persistTimerState = useCallback(() => {
+    if (!didRehydrateRef.current) return;
+    saveTimerState({
+      endTime: endTimeRef.current,
+      sessionType: sessionTypeRef.current,
+      completedPomodoros: completedRef.current,
+      isRunning: isRunningRef.current,
+    });
+  }, []);
+
   // Only reset displayed time when actual duration settings change, not on every poll-created object
   useEffect(() => {
     if (!isRunning) {
@@ -189,12 +201,11 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
   const advanceSession = useCallback((notify: boolean = true) => {
     const current = sessionTypeRef.current;
     const completed = completedRef.current;
-    // If the timer ended more than 3 s ago, the screen was off and AlarmActivity already
-    // played the sound — skip in-app sound/notification to avoid a duplicate when the
-    // JS timer resumes after the screen turns back on.
+    const androidNative = Platform.OS === 'android' && !!NativeModules.AlarmSound;
+    // overdueMs guards the iOS/Expo path only: if the app resumes long after the session ended,
+    // skip the stale in-app sound. Android never plays from JS (the native side owns sound).
     const overdueMs = endTimeRef.current ? Math.max(0, Date.now() - endTimeRef.current) : 0;
     const shouldNotify = notify && overdueMs < 3000;
-    const androidNative = Platform.OS === 'android' && !!NativeModules.AlarmSound;
 
     cancelScheduledNotifications();
     cancelAlarmActivity();
@@ -297,15 +308,8 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
 
   // Persist the session snapshot on every transition so a process kill can restore it. Declared
   // after the isRunning effect so endTimeRef is already set/cleared by the time this reads it.
-  // Guarded until rehydration so we don't overwrite the saved session with mount-time defaults.
   useEffect(() => {
-    if (!didRehydrateRef.current) return;
-    saveTimerState({
-      endTime: endTimeRef.current,
-      sessionType,
-      completedPomodoros,
-      isRunning,
-    });
+    persistTimerState();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionType, completedPomodoros, isRunning]);
 
@@ -406,16 +410,9 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
       endTimeRef.current = null;
     }
     // Seeking moves endTime without changing sessionType/isRunning, so the persist effect won't
-    // fire — save the new endTime explicitly so a kill mid-seek restores the right remaining time.
-    if (didRehydrateRef.current) {
-      saveTimerState({
-        endTime: endTimeRef.current,
-        sessionType: sessionTypeRef.current,
-        completedPomodoros: completedRef.current,
-        isRunning: isRunningRef.current,
-      });
-    }
-  }, []);
+    // fire — save explicitly so a kill mid-seek restores the right remaining time.
+    persistTimerState();
+  }, [persistTimerState]);
 
   const totalDuration = sessionDuration(sessionType, settingsRef.current);
 

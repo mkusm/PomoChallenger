@@ -135,6 +135,5 @@ class AlarmActivity : Activity() {
     player = null
     AlarmService.wakeLock?.let { if (it.isHeld) it.release() }
     AlarmService.wakeLock = null
-    AlarmSoundModule.alarmActivityShowing = false
   }
 }

@@ -68,7 +68,6 @@ class AlarmService : Service() {
     // If the app is in the foreground, play the sound in-process (JS shows the break UI but stays
     // silent) and stop — no full-screen activity or notification needed while the app is open.
     if (isAppInForeground()) {
-      AlarmSoundModule.alarmActivityShowing = false
       AlarmSoundModule.instance?.play(sound)
       stopForeground(true)
       stopSelf()
@@ -76,8 +75,6 @@ class AlarmService : Service() {
     }
 
     // Backgrounded/locked: AlarmActivity (locked) or the notification channel (unlocked) plays.
-    AlarmSoundModule.alarmActivityShowing = true
-
     // Acquire WakeLock with ACQUIRE_CAUSES_WAKEUP so the screen turns on
     val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
     wakeLock?.let { if (it.isHeld) it.release() }
@@ -148,19 +145,17 @@ class AlarmService : Service() {
     CountdownService.instance?.cancel()
       ?: nm.cancel(AlarmSoundModule.COUNTDOWN_NOTIF_ID)
 
-    // On the FSI path AlarmActivity plays the sound and resets alarmActivityShowing in onDestroy.
+    // On the FSI path, AlarmActivity plays the sound and stops this service when it dismisses.
     if (!useFsiPath) {
       // No full-screen activity will run — the notification channel plays the sound. Release the
-      // wakelock and stop this foreground service shortly after the screen has woken (the alarm
-      // notification, a separate id, stays in the shade), and reset the JS-play guard once the JS
-      // timer has passed its own play point so future foreground sounds aren't blocked.
+      // wakelock and stop this foreground service shortly after the screen has woken; the alarm
+      // notification (a separate id) stays in the shade.
       Handler(Looper.getMainLooper()).postDelayed({
         try {
           wakeLock?.let { if (it.isHeld) it.release() }
           wakeLock = null
           stopForeground(STOP_FOREGROUND_REMOVE)
           stopSelf()
-          AlarmSoundModule.alarmActivityShowing = false
         } catch (e: Exception) {
           Log.w("Pomo", "AlarmService cleanup failed", e)
         }

@@ -23,10 +23,10 @@ Implemented and **verified on a physical Pixel 8** over adb (see `CLAUDE.md` →
 - ✅ **§2.5** foreground-service types — both services were falsely typed `mediaPlayback` (neither plays media through the service). Switched to `specialUse` (+ `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` property + `FOREGROUND_SERVICE_SPECIAL_USE` permission). Verified on-device (Android 16): both services start with **no FGS exceptions**; aapt2 confirms the merged manifest. **Play note:** `specialUse` requires a short justification in the Play Console submission form.
 - ✅ **Bonus (found on-device):** locked-screen **double sound** — the countdown foreground-service keeps the JS timer ticking while locked, so JS `play()` and `AlarmActivity` both fired. An `AppState === 'active'` guard proved *unreliable*: MainActivity is `showWhenLocked`, so the wakelock makes the app read "active" even locked — the race was a coin flip (passed once, failed later). Final fix makes **`AlarmService` the single sound authority**: JS never plays on Android; the service plays in-process when foregrounded, via `AlarmActivity` when locked, or via the notification channel when unlocked. Verified on-device: **exactly 1 MediaPlayer in both the locked and foreground paths** (challenge modal still shows in foreground).
 - ✅ **§2.1 loose end resolved:** changing a duration on Settings now reflects on the Timer immediately — `saveSettings`/`saveChallenges` emit a `DeviceEventEmitter` event that TimerScreen reloads on, closing the blur-commit vs focus-read race. Verified on-device (Timer showed the new value instantly).
+- ✅ **§2.3** deduped the countdown + idle "ready to start" notification builders (~50 duplicated lines across two classes) into one shared `CountdownService.buildNotification(...)`. **Session cleanup pass** also: removed the now-dead `alarmActivityShowing` double-sound guard (obsolete once JS stopped playing sound on Android), factored the timer-state persist into one `persistTimerState()` helper, and dropped stale comments/unused imports. `AlarmSoundModule.kt` shrank ~230 lines.
 
 **Deferred** (larger refactors / lower value):
-- §1.6 native next-alarm scheduling.
-- §2.3 dedupe notification builders; §2.4 `usePomodoro` reducer refactor; `expo-av` → `expo-audio`.
+- §1.6 native next-alarm scheduling; §2.4 `usePomodoro` reducer refactor; `expo-av` → `expo-audio` (only reachable on iOS now, untestable here).
 
 ---
 

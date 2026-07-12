@@ -10,8 +10,6 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.util.Log
-import android.widget.RemoteViews
-import androidx.core.app.NotificationCompat
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
@@ -35,16 +33,13 @@ class AlarmSoundModule(private val ctx: ReactApplicationContext) : ReactContextB
   companion object {
     private const val ALARM_REQUEST_CODE = 1001
     const val COUNTDOWN_NOTIF_ID = 9003
-    // Set to true by AlarmService before it starts AlarmActivity so play() is skipped,
-    // preventing a double sound when both JS and AlarmActivity fire at the same time.
-    @Volatile var alarmActivityShowing = false
     @Volatile var instance: AlarmSoundModule? = null
   }
 
-  // Play immediately on STREAM_ALARM (foreground use)
+  // Play the alarm sound immediately on STREAM_ALARM. Called by AlarmService when the app is in
+  // the foreground (the single sound authority — see AlarmService); JS never calls this on Android.
   @ReactMethod
   fun play(fileName: String) {
-    if (alarmActivityShowing) return  // AlarmActivity is handling sound
     try {
       player?.release()
       val resId = ctx.resources.getIdentifier(
@@ -71,8 +66,6 @@ class AlarmSoundModule(private val ctx: ReactApplicationContext) : ReactContextB
   @ReactMethod
   fun scheduleAlarm(triggerAtMs: Double, title: String, body: String, sound: String, isBreak: Boolean) {
     try {
-      // Fresh schedule — clear the guard so a previously-leaked flag can't mute this alarm.
-      alarmActivityShowing = false
       val intent = Intent(ctx, AlarmService::class.java).apply {
         putExtra("title", title)
         putExtra("body", body)
@@ -141,55 +134,14 @@ class AlarmSoundModule(private val ctx: ReactApplicationContext) : ReactContextB
     } catch (e: Exception) { Log.w("Pomo", "cancelCountdownNotification failed", e) }
   }
 
-  // Show a static "ready to start" notification when the timer is idle (not running).
-  // Stops CountdownService first if it's running, then posts directly (no service needed
-  // since the notification doesn't need periodic updates).
+  // Show a static "ready to start" notification when the timer is idle (not running): the shared
+  // countdown layout with a full progress bar and a resume button. Stops CountdownService first
+  // (no service needed — the idle notification doesn't update), then posts directly.
   @ReactMethod
   fun showIdleNotification(label: String, timeText: String, isBreak: Boolean) {
     try {
-      CountdownService.instance?.cancel()  // stop countdown updates if still running
-      CountdownService.ensureChannel(ctx)
-
-      val layoutId = if (isBreak) {
-        ctx.resources.getIdentifier("notification_countdown_break", "layout", ctx.packageName)
-      } else {
-        ctx.resources.getIdentifier("notification_countdown_work", "layout", ctx.packageName)
-      }
-      val progressId = ctx.resources.getIdentifier("cd_progress", "id", ctx.packageName)
-      val textId     = ctx.resources.getIdentifier("cd_text",     "id", ctx.packageName)
-      val buttonId   = ctx.resources.getIdentifier("cd_button",   "id", ctx.packageName)
-
-      val views = RemoteViews(ctx.packageName, layoutId)
-      views.setProgressBar(progressId, 1000, 1000, false)
-      views.setFloat(progressId, "setScaleX", -1f)
-      views.setTextViewText(textId, timeText)
-      views.setImageViewResource(buttonId, android.R.drawable.ic_media_play)
-
-      val resumeIntent = Intent("${ctx.packageName}.RESUME_TIMER").setPackage(ctx.packageName)
-      val resumePi = PendingIntent.getBroadcast(
-        ctx, CountdownService.RESUME_REQUEST_CODE, resumeIntent,
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-      )
-      views.setOnClickPendingIntent(buttonId, resumePi)
-
-      val tapPi = PendingIntent.getActivity(
-        ctx, COUNTDOWN_NOTIF_ID,
-        ctx.packageManager.getLaunchIntentForPackage(ctx.packageName) ?: Intent(),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-      )
-      val notif = NotificationCompat.Builder(ctx, CountdownService.CHANNEL_ID)
-        .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-        .setContentTitle(label)
-        .setOngoing(true)
-        .setSilent(true)
-        .setOnlyAlertOnce(true)
-        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-        .setStyle(NotificationCompat.DecoratedCustomViewStyle())
-        .setCustomContentView(views)
-        .setCustomBigContentView(views)
-        .setContentIntent(tapPi)
-        .build()
-
+      CountdownService.instance?.cancel()
+      val notif = CountdownService.buildNotification(ctx, label, timeText, 1000, isBreak, true)
       val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
       nm.notify(COUNTDOWN_NOTIF_ID, notif)
     } catch (e: Exception) { Log.w("Pomo", "showIdleNotification failed", e) }
@@ -198,8 +150,6 @@ class AlarmSoundModule(private val ctx: ReactApplicationContext) : ReactContextB
   @ReactMethod
   fun cancelAlarm() {
     try {
-      // Clearing a pending/fired alarm also clears the double-sound guard.
-      alarmActivityShowing = false
       val intent = Intent(ctx, AlarmService::class.java)
       val pi = if (Build.VERSION.SDK_INT >= 26) {
         PendingIntent.getForegroundService(
