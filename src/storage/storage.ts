@@ -1,5 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Settings, DEFAULT_SETTINGS, DEFAULT_CHALLENGES, DEFAULT_GROUPS, Challenge } from '../types';
+import { DeviceEventEmitter } from 'react-native';
+import { Settings, SessionType, DEFAULT_SETTINGS, DEFAULT_CHALLENGES, DEFAULT_GROUPS, Challenge } from '../types';
+
+// Emitted after settings/challenges are written so other screens (TimerScreen) can reload
+// immediately, instead of racing the in-flight AsyncStorage write on the next tab focus.
+export const STORAGE_CHANGED_EVENT = 'pomo_storage_changed';
 
 const KEYS = {
   SETTINGS: 'pomo_settings',
@@ -8,7 +13,33 @@ const KEYS = {
   LAST_GROUP: 'pomo_last_group',
   CHALLENGE_DATES: 'pomo_challenge_dates',
   RECENT_CHALLENGES: 'pomo_recent_challenges',
+  TIMER_STATE: 'pomo_timer_state',
 };
+
+// Snapshot of the running timer, persisted so a session survives process death / OEM kills.
+// endTime is the absolute wall-clock ms when the session ends (null when not running).
+export interface PersistedTimerState {
+  endTime: number | null;
+  sessionType: SessionType;
+  completedPomodoros: number;
+  isRunning: boolean;
+}
+
+export async function saveTimerState(state: PersistedTimerState): Promise<void> {
+  await AsyncStorage.setItem(KEYS.TIMER_STATE, JSON.stringify(state));
+}
+
+export async function loadTimerState(): Promise<PersistedTimerState | null> {
+  try {
+    const raw = await AsyncStorage.getItem(KEYS.TIMER_STATE);
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    if (typeof s !== 'object' || s === null || typeof s.sessionType !== 'string') return null;
+    return s as PersistedTimerState;
+  } catch {
+    return null;
+  }
+}
 
 export async function loadSettings(): Promise<Settings> {
   try {
@@ -22,6 +53,7 @@ export async function loadSettings(): Promise<Settings> {
 
 export async function saveSettings(settings: Settings): Promise<void> {
   await AsyncStorage.setItem(KEYS.SETTINGS, JSON.stringify(settings));
+  DeviceEventEmitter.emit(STORAGE_CHANGED_EVENT);
 }
 
 export async function loadChallenges(): Promise<Challenge[]> {
@@ -56,6 +88,7 @@ export async function loadChallenges(): Promise<Challenge[]> {
 
 export async function saveChallenges(challenges: Challenge[]): Promise<void> {
   await AsyncStorage.setItem(KEYS.CHALLENGES, JSON.stringify(challenges));
+  DeviceEventEmitter.emit(STORAGE_CHANGED_EVENT);
 }
 
 export async function loadGroups(): Promise<string[]> {

@@ -3,6 +3,7 @@ import { AppState, AppStateStatus, DeviceEventEmitter, NativeModules, Platform }
 import * as Notifications from 'expo-notifications';
 import { Audio } from 'expo-av';
 import { SessionType, Settings } from '../types';
+import { saveTimerState, loadTimerState } from '../storage/storage';
 import { CHANNEL_WORK, CHANNEL_BREAK } from '../../App';
 
 const soundAssets = {
@@ -146,6 +147,9 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
   const isRunningRef = useRef(isRunning);
   // True while the user is dragging the slider — suppress tick updates to avoid fighting the thumb
   const isScrubbingRef = useRef(false);
+  // False until the persisted session has been read on mount — guards the persist effect from
+  // clobbering saved state with initial defaults before we've had a chance to restore it.
+  const didRehydrateRef = useRef(false);
 
   sessionTypeRef.current = sessionType;
   completedRef.current = completedPomodoros;
@@ -159,6 +163,28 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.workDuration, settings.shortBreakDuration, settings.longBreakDuration]);
+
+  // On mount, restore a session interrupted by a process kill (aggressive OEM battery managers
+  // routinely kill backgrounded apps). The native alarm is scheduled via AlarmManager, which
+  // survives death independently, so restoring here just re-syncs the UI with it.
+  useEffect(() => {
+    loadTimerState().then((s) => {
+      didRehydrateRef.current = true;
+      // Only restore a session that was actually mid-countdown when the process died — resuming a
+      // live timer is the valuable case and can't be stale. Idle or already-ended states fall
+      // through to the normal fresh 'work' session, so cold starts aren't surprising.
+      if (s && s.isRunning && s.endTime && s.endTime > Date.now()) {
+        setCompletedPomodoros(s.completedPomodoros);
+        setSessionType(s.sessionType);
+        // Resume the countdown. Setting isRunning re-arms the native alarm; setAlarmClock replaces
+        // the still-pending one at the same endTime, so there's no duplicate.
+        endTimeRef.current = s.endTime;
+        setTimeRemaining(Math.max(1, Math.ceil((s.endTime - Date.now()) / 1000)));
+        setIsRunning(true);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const advanceSession = useCallback((notify: boolean = true) => {
     const current = sessionTypeRef.current;
@@ -275,6 +301,20 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRunning]);
 
+  // Persist the session snapshot on every transition so a process kill can restore it. Declared
+  // after the isRunning effect so endTimeRef is already set/cleared by the time this reads it.
+  // Guarded until rehydration so we don't overwrite the saved session with mount-time defaults.
+  useEffect(() => {
+    if (!didRehydrateRef.current) return;
+    saveTimerState({
+      endTime: endTimeRef.current,
+      sessionType,
+      completedPomodoros,
+      isRunning,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionType, completedPomodoros, isRunning]);
+
   // Show or hide idle notification when persistentNotification setting changes
   useEffect(() => {
     if (isRunningRef.current) return;
@@ -370,6 +410,16 @@ export function usePomodoro({ settings, onBreakStart }: UsePomodoroOptions): Use
       showCountdownNotification(endTimeRef.current, sessionDuration(sessionTypeRef.current, settingsRef.current) * 1000, sessionTypeRef.current);
     } else {
       endTimeRef.current = null;
+    }
+    // Seeking moves endTime without changing sessionType/isRunning, so the persist effect won't
+    // fire — save the new endTime explicitly so a kill mid-seek restores the right remaining time.
+    if (didRehydrateRef.current) {
+      saveTimerState({
+        endTime: endTimeRef.current,
+        sessionType: sessionTypeRef.current,
+        completedPomodoros: completedRef.current,
+        isRunning: isRunningRef.current,
+      });
     }
   }, []);
 

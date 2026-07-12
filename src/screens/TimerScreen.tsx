@@ -5,12 +5,13 @@ import {
   TouchableOpacity,
   StyleSheet,
   Modal,
+  DeviceEventEmitter,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import Slider from '@react-native-community/slider';
 import { usePomodoro } from '../hooks/usePomodoro';
-import { loadSettings, loadChallenges, loadLastGroup, saveLastGroup, loadChallengeDates, saveChallengeDates, loadRecentChallengeIds, saveRecentChallengeIds } from '../storage/storage';
+import { loadSettings, loadChallenges, loadLastGroup, saveLastGroup, loadChallengeDates, saveChallengeDates, loadRecentChallengeIds, saveRecentChallengeIds, STORAGE_CHANGED_EVENT } from '../storage/storage';
 import { Settings, SessionType, DEFAULT_SETTINGS, Challenge, TAG_LABELS } from '../types';
 import { pickChallenge } from '../logic/pickChallenge';
 
@@ -75,6 +76,16 @@ export default function TimerScreen() {
       refreshHistoryRefs();
     }, [refreshData, refreshHistoryRefs])
   );
+
+  // Also reload the instant a write lands on another tab, so a duration edit shows immediately
+  // instead of waiting for the next focus (and without racing the in-flight write).
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(STORAGE_CHANGED_EVENT, () => {
+      refreshData();
+      refreshHistoryRefs();
+    });
+    return () => sub.remove();
+  }, [refreshData, refreshHistoryRefs]);
 
   const recordChallengeShown = useCallback((id: string) => {
     const today = new Date().toISOString().slice(0, 10);

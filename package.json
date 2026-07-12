@@ -1,6 +1,6 @@
 {
   "name": "pomo",
-  "version": "1.0.54",
+  "version": "1.0.57",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
